@@ -480,7 +480,7 @@ DESC_TO_CODE = {
     "New Mexico - Employee Worker's Compensation Fee": "32-470",
     "New Mexico - Employer Unemployment": "32-459",
     "New Mexico - Employer Workers' Compensation Fee": "32-471",
-    "New York - Employee Disability": "33-466",
+    "New York - Employee PFL": "33-468",
     "New York - Employee Withholding": "33-450",
     "New York - Employer Unemployment": "33-459",
     "New York - Re-employment Service Fund": "33-461",
