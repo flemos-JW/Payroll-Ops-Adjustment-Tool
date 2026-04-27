@@ -756,22 +756,26 @@ with left:
 
             if limit == "Yes":
                 l1, l2 = st.columns([1, 1])
+                _tytd_key     = f"{key_prefix}_tytd_{i}"
+                _tlimit_key   = f"{key_prefix}_tlimit_amt_{i}"
                 with l1:
+                    _tytd_kwargs = {"value": float(tax.get("ytd_limit", 0.0))} if _tytd_key not in st.session_state else {}
                     ytd_limit = st.number_input(
                         "YTD",
                         min_value=0.0,
-                        value=float(tax.get("ytd_limit", 0.0)),
                         step=100.0, format="%.2f",
-                        key=f"{key_prefix}_tytd_{i}",
+                        key=_tytd_key,
+                        **_tytd_kwargs,
                     )
                     taxes[i]["ytd_limit"] = ytd_limit
                 with l2:
+                    _tlimit_kwargs = {"value": float(tax.get("limit_amount", 0.0))} if _tlimit_key not in st.session_state else {}
                     limit_amount = st.number_input(
                         "Limit",
                         min_value=0.0,
-                        value=float(tax.get("limit_amount", 0.0)),
                         step=100.0, format="%.2f",
-                        key=f"{key_prefix}_tlimit_amt_{i}",
+                        key=_tlimit_key,
+                        **_tlimit_kwargs,
                     )
                     taxes[i]["limit_amount"] = limit_amount
 
