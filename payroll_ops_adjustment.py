@@ -3,6 +3,22 @@ import pandas as pd
 import streamlit as st
 
 # ---------------------------------------------------------------------------
+# Password gate
+# ---------------------------------------------------------------------------
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("Payroll Ops Adjustment Tool")
+    pw = st.text_input("Enter password", type="password")
+    if pw == "PayOps2026":
+        st.session_state.authenticated = True
+        st.rerun()
+    elif pw:
+        st.error("Incorrect password.")
+    st.stop()
+
+# ---------------------------------------------------------------------------
 # SUI taxable wage bases  (hardcoded — sourced from uploaded table)
 # ---------------------------------------------------------------------------
 SUI_WAGE_BASES = {
