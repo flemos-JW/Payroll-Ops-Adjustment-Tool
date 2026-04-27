@@ -42,22 +42,34 @@ The app will open automatically in your browser at `http://localhost:8501`.
 
 Follow these steps once to have the app start automatically every time you turn on your Mac.
 
-### 1. Find your username
-In Terminal, run:
+### 1. Find your three values
+Open Terminal and run each of these commands. Write down the output — you'll need all three in the next step.
+
+**Your username:**
 ```
 whoami
 ```
-Note the output — it's your Mac username (e.g. `janesmith`).
+Example output: `janesmith`
 
-### 2. Find the full path to Python
-In Terminal, run:
+**Your Python path:**
 ```
 which python3
 ```
-Note the output (e.g. `/usr/local/bin/python3`).
+Example output: `/usr/local/bin/python3`
 
-### 3. Create the launch agent file
-Open TextEdit, switch to plain text mode (**Format → Make Plain Text**), and paste the following — replacing `YOUR_USERNAME`, `YOUR_PYTHON_PATH`, and `YOUR_REPO_PATH` with your actual values:
+**Your repo path** — this is the folder where you cloned the repo. Run:
+```
+cd ~/Payroll-Ops-Adjustment-Tool && pwd
+```
+Example output: `/Users/janesmith/Payroll-Ops-Adjustment-Tool`
+
+### 2. Create the launch agent file
+Open TextEdit, switch to plain text mode (**Format → Make Plain Text**), and paste the following — replacing `YOUR_USERNAME`, `YOUR_PYTHON_PATH`, and `YOUR_REPO_PATH` with the values you just collected.
+
+For example, if your username is `janesmith`, your Python path is `/usr/local/bin/python3`, and your repo path is `/Users/janesmith/Payroll-Ops-Adjustment-Tool`, the file would look like:
+- `com.janesmith.payrollopstool`
+- `<string>/usr/local/bin/python3</string>`
+- `<string>/Users/janesmith/Payroll-Ops-Adjustment-Tool/payroll_ops_adjustment.py</string>`
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -100,7 +112,7 @@ Save the file as `com.YOUR_USERNAME.payrollopstool.plist` in this folder:
 /Users/YOUR_USERNAME/Library/LaunchAgents/
 ```
 
-### 4. Register the launch agent
+### 3. Register the launch agent
 In Terminal, run:
 ```
 launchctl load ~/Library/LaunchAgents/com.YOUR_USERNAME.payrollopstool.plist
