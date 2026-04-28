@@ -1801,7 +1801,7 @@ with tab_ficad:
         st.caption("Paste a CS Tools link for each quarter to make the header clickable")
         for q in _ficad_debit_active_quarters:
             st.text_input(f"Q{q['qnum']} CS Tools Link", placeholder="Paste link here...", key=f"ficad_q{q['qnum']}_link", label_visibility="visible")
-        st.text_input("Credit Date", placeholder="e.g. 01/15/2025", key="ficad_credit_date", label_visibility="visible")
+        st.text_input("Debit Date", placeholder="e.g. 01/15/2025", key="ficad_credit_date", label_visibility="visible")
 
         st.divider()
 
