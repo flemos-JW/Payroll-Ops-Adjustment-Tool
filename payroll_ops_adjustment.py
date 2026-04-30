@@ -550,6 +550,14 @@ EMPLOYER_DESCRIPTIONS = [d for d in TAX_DESCRIPTIONS if "employer" in d.lower() 
 st.set_page_config(page_title="Payroll Ops Adjustment Tool", layout="wide")
 st.title("Payroll Ops Adjustment Tool")
 
+with st.sidebar:
+    if st.button("Clear Data", use_container_width=True, type="primary"):
+        keys_to_keep = {"authenticated"}
+        for k in list(st.session_state.keys()):
+            if k not in keys_to_keep:
+                del st.session_state[k]
+        st.rerun()
+
 # Hide +/- stepper buttons on all number inputs across the app
 st.markdown("""
 <style>
