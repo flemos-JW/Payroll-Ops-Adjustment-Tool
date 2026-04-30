@@ -1828,13 +1828,22 @@ with tab_ficad:
             date_val    = _ficad_debit_credit_date
             header      = (f'<a href="{url}" target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">Q{qn} ADJ in CS Tools</a>'
                            if url else f'<strong>Q{qn} ADJ in CS Tools</strong>')
-            _ficad_debit_html += (
-                f'<p style="margin:0 0 8px 0; line-height:1.4;">'
-                f'{header}<br>'
-                f'Employee Debit: ${member_amt:,.2f} on {date_val}<br>'
-                f'Employer Debit: ${company_amt:,.2f} on {date_val}'
-                f'</p>'
-            )
+            if _ficad_debit_member:
+                _ficad_debit_html += (
+                    f'<p style="margin:0 0 8px 0; line-height:1.4;">'
+                    f'{header}<br>'
+                    f'Employee Debit: ${member_amt:,.2f} on {date_val}<br>'
+                    f'Employer Debit: ${company_amt:,.2f} on {date_val}'
+                    f'</p>'
+                )
+            else:
+                combined_amt = round(member_amt + company_amt, 2)
+                _ficad_debit_html += (
+                    f'<p style="margin:0 0 8px 0; line-height:1.4;">'
+                    f'{header}<br>'
+                    f'Employer Debit: ${combined_amt:,.2f} on {date_val}'
+                    f'</p>'
+                )
         if st.session_state.ficad_selected_year < _date.today().year:
             _ficad_debit_html += '<p style="margin:0; line-height:1.4;">The W-2c has been generated and can be viewed in the member documents center.</p>'
         _ficad_debit_html += '</div>'
