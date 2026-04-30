@@ -620,7 +620,7 @@ with left:
     ss_wage_base = SS_WAGE_BASES[year]
     st.caption(f"Social Security wage base for {year}: **${ss_wage_base:,}**")
 
-    ytd_med = st.number_input("YTD Medicare Wages ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f")
+    ytd_med = st.number_input("YTD Medicare Wages ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f", key="ytd_med_input")
     ytd_ss  = ytd_med
 
     st.divider()
