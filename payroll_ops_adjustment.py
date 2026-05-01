@@ -1603,7 +1603,7 @@ with tab_ficad:
             gross_col, ss_col, med_col, futa_col, ytd_col = st.columns([1, 1, 1, 1, 1])
             with gross_col:
                 st.caption("**Gross**")
-                q["gross_wages"] = st.number_input("Gross Wages ($)", min_value=0.0, value=q["gross_wages"], step=0.01, format="%.2f", key=f"ficad_gross_wages_{qn}")
+                q["gross_wages"] = st.number_input("Gross Wages ($)", min_value=0.0, value=q["gross_wages"], step=0.01, format="%.2f", key=f"ficad_gross_wages_{qn}_{st.session_state._clear_count}")
 
             # SS and FUTA — capped at annual wage base
             _ss_rem   = max(0.0, _ficad_limits["ss"]   - _ytd_ss_wages)
