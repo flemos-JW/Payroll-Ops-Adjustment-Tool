@@ -550,10 +550,15 @@ EMPLOYER_DESCRIPTIONS = [d for d in TAX_DESCRIPTIONS if "employer" in d.lower() 
 st.set_page_config(page_title="Payroll Ops Adjustment Tool", layout="wide")
 st.title("Payroll Ops Adjustment Tool")
 
+if "_clear_count" not in st.session_state:
+    st.session_state._clear_count = 0
+
 with st.sidebar:
     if st.button("Clear Data", use_container_width=True, type="primary"):
+        new_count = st.session_state._clear_count + 1
         st.session_state.clear()
         st.session_state.authenticated = True
+        st.session_state._clear_count = new_count
         st.rerun()
 
 # Hide +/- stepper buttons on all number inputs across the app
@@ -618,7 +623,7 @@ with left:
     ss_wage_base = SS_WAGE_BASES[year]
     st.caption(f"Social Security wage base for {year}: **${ss_wage_base:,}**")
 
-    ytd_med = st.number_input("YTD Medicare Wages ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f", key="ytd_med_input")
+    ytd_med = st.number_input("YTD Medicare Wages ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f", key=f"ytd_med_input_{st.session_state._clear_count}")
     ytd_ss  = ytd_med
 
     st.divider()
