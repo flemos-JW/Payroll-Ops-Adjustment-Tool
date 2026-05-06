@@ -355,7 +355,7 @@ def render_breakdown(gross, result, ss_wage_base, ytd_ss):
     remaining = max(0.0, ss_wage_base - ytd_ss)
     if remaining == 0:
         st.info(f"SS wage base of {fmtmd(ss_wage_base)} already met — no Social Security withheld.")
-    elif result["ss_taxable"] < gross:
+    elif round(result["ss_taxable"], 2) < round(gross, 2):
         st.info(
             f"SS wage base reached mid-payment: only {fmtmd(result['ss_taxable'])} of "
             f"{fmtmd(gross)} was subject to SS. Remaining room was {fmtmd(remaining)}."
