@@ -321,7 +321,7 @@ def render_breakdown(gross, result, ss_wage_base, ytd_ss):
     html += row("Gross Pay", fmt(gross))
 
     if result["ss_amount"] > 0:
-        note = f"partial — {fmt(result['ss_taxable'])} taxable" if result["ss_taxable"] < gross else ""
+        note = f"partial — {fmt(result['ss_taxable'])} taxable" if round(result["ss_taxable"], 2) < round(gross, 2) else ""
         html += row("&minus; Social Security", fmt(-result["ss_amount"]), "6.20%", note)
     else:
         html += row("&minus; Social Security", "$0.00", "6.20%", "wage base met")
