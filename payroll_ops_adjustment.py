@@ -741,7 +741,7 @@ with left:
                 rate = st.number_input(
                     "Rate",
                     min_value=0.0, max_value=100.0,
-                    step=0.1, format="%.2f",
+                    step=0.0001, format="%.4f",
                     key=_trate_key,
                     label_visibility="collapsed",
                     **_trate_kwargs,
