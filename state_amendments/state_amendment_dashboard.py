@@ -20,7 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 import streamlit as st
-from components import inject_global_css, render_header, render_alert
+from components import (
+    inject_global_css, render_header, render_alert, render_app_sidebar,
+    render_step_progress, render_metric_row, render_section_divider,
+    render_results_table, page_config,
+)
 
 SCRIPT_DIR    = Path(__file__).resolve().parent
 INPUT_PATH    = SCRIPT_DIR / "amendments.csv"
@@ -28,29 +32,63 @@ RESULTS_PATH  = SCRIPT_DIR / "results.csv"
 FAILED_PATH   = SCRIPT_DIR / "failed_amendments.csv"
 RUN_SCRIPT    = SCRIPT_DIR / "state_amendment_run.py"
 
-st.set_page_config(page_title="State Amendments", layout="wide", page_icon="🏛️")
+page_config("State Amendments", "🏛️")
+
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
+def _clear_data():
+    for k in list(st.session_state.keys()):
+        if k != "authenticated":
+            del st.session_state[k]
+    st.rerun()
+
+render_app_sidebar("State Amendments", "v1.2", "#8338ec",
+                   quick_actions=[{"label": "Clear Session", "callback": _clear_data, "key": "sa_clear"}])
 
 # ---------------------------------------------------------------------------
 # Header + shared styles
 # ---------------------------------------------------------------------------
 inject_global_css("sa", accent_color="#8338ec")
 render_header("sa", "STATE AMENDMENTS AUTOMATOR",
-              "UPLOAD CSV · REVIEW · COPY COMMAND · RUN IN TERMINAL",
+              "UPLOAD CSV · REVIEW · RUN AUTOMATION",
               accent_color="#8338ec", secondary_color="#00e5ff", icon="\U0001f3db️")
+
+# ---------------------------------------------------------------------------
+# Step Progress
+# ---------------------------------------------------------------------------
+_has_data = st.session_state.get("sa_upload") is not None
+_has_saved = bool(st.session_state.get("sa_saved_count"))
+_has_batch = bool((st.session_state.get("sa_cid") or "").strip() and
+                  (st.session_state.get("sa_company") or "").strip())
+_has_results = RESULTS_PATH.exists()
+steps = [
+    {"label": "Upload", "complete": _has_data},
+    {"label": "Save", "complete": _has_saved},
+    {"label": "Settings", "complete": _has_batch},
+    {"label": "Run", "complete": _has_results},
+    {"label": "Results", "complete": _has_results},
+]
+_current = 0
+if steps[0]["complete"]:
+    _current = 1
+if steps[1]["complete"]:
+    _current = 2
+if steps[2]["complete"]:
+    _current = 3
+if steps[3]["complete"]:
+    _current = 4
+render_step_progress("sa", steps, _current, "#8338ec")
 
 # ---------------------------------------------------------------------------
 # Input section
 # ---------------------------------------------------------------------------
-st.subheader("1 · Upload CSV")
 st.caption(
     "Expected columns: **State**, **Employee Name**, **MID**, "
     "**Total State Tax**, **Amendment Title**. Header row required. "
     "One row per employee — rows for the same state are grouped into a "
-    "single amendment. `Total State Tax` and `Amendment Title` should "
-    "repeat (or be blank on duplicate rows; the first non-empty value per "
-    "state wins). MIDs without a leading `M` are auto-prefixed. "
-    "Drop in the Large Adjustment Generator's **State Tax Export** directly "
-    "— just fill in the blank `Amendment Title` column in Excel first."
+    "single amendment. MIDs without a leading `M` are auto-prefixed. "
+    "Drop in the Large Adjustment Generator's **State Tax Export** directly."
 )
 
 uploaded = st.file_uploader(
@@ -114,7 +152,6 @@ def parse_csv_text(text):
     if df.empty:
         return None, None, "No rows found."
 
-    # Accept singular OR plural variants for backward compatibility
     lookup    = {_norm(c): c for c in df.columns}
     state_key = lookup.get("state")
     emp_key   = (lookup.get("employeename")  or lookup.get("employeenames")
@@ -134,7 +171,6 @@ def parse_csv_text(text):
     if missing:
         return None, None, f"Missing column(s): {', '.join(missing)}"
 
-    # Normalize the per-employee frame
     out = pd.DataFrame({
         "State":           df[state_key].astype(str).str.strip(),
         "Employee Name":   df[emp_key].astype(str).str.strip(),
@@ -142,7 +178,6 @@ def parse_csv_text(text):
         "Total State Tax": df[total_key].astype(str).str.strip(),
         "Amendment Title": df[title_key].astype(str).str.strip(),
     })
-    # Drop completely empty rows (Excel trailing blanks etc.)
     out = out[(out["State"].str.len() > 0) | (out["MID"].str.len() > 0)].reset_index(drop=True)
 
     def _parse_amount(s):
@@ -151,12 +186,10 @@ def parse_csv_text(text):
         except (ValueError, TypeError):
             return 0.0
 
-    # Group by State into a per-state preview
     preview_rows = []
     for state, g in out.groupby("State", sort=True):
         names = [n for n in g["Employee Name"].tolist() if n]
         mids  = [m for m in g["MID"].tolist() if m]
-        # Take first non-empty Amendment Title and first non-empty Total
         title_candidates  = [t for t in g["Amendment Title"].tolist() if t]
         amendment_title   = title_candidates[0] if title_candidates else ""
         totals_all        = [_parse_amount(v) for v in g["Total State Tax"].tolist() if str(v).strip()]
@@ -169,7 +202,6 @@ def parse_csv_text(text):
             "Employees":       len(names) if names else len(mids),
             "MIDs":            len(mids),
             "Total State Tax": state_total,
-            # Extras for warnings
             "_name_count":     len(names),
             "_mid_count":      len(mids),
             "_title_blank":    amendment_title == "",
@@ -199,7 +231,6 @@ with col_preview:
         )
         st.dataframe(_display, use_container_width=True, hide_index=True, height=260)
 
-        # Warnings — operate at STATE level, not row level
         _blank_titles = state_df[state_df["_title_blank"]]
         _variance     = state_df[state_df["_total_variance"]]
         _name_mid_mm  = state_df[
@@ -231,7 +262,6 @@ with col_preview:
         st.caption("Upload a CSV above — preview will appear here.")
 
 with col_save:
-    st.subheader("2 · Save")
     save_disabled = raw_df is None or raw_df.empty
     if st.button("💾  Save to amendments.csv",
                  type="primary",
@@ -253,10 +283,9 @@ if st.session_state.get("sa_saved_count"):
                  "")
 
 # ---------------------------------------------------------------------------
-# Batch settings (CID + Company Name apply to every row in the batch)
+# Batch settings
 # ---------------------------------------------------------------------------
-st.divider()
-st.subheader("3 · Batch Settings")
+render_section_divider("sa", "BATCH SETTINGS", "#8338ec")
 st.caption(
     "These apply to every row in the batch. The automation will use them to "
     "fill out the amendment form."
@@ -264,17 +293,9 @@ st.caption(
 
 _cid_col, _company_col = st.columns(2)
 with _cid_col:
-    cid = st.text_input(
-        "CID",
-        key="sa_cid",
-        placeholder="e.g. C12345",
-    )
+    cid = st.text_input("CID", key="sa_cid", placeholder="e.g. C12345")
 with _company_col:
-    company = st.text_input(
-        "Company Name",
-        key="sa_company",
-        placeholder="e.g. Zip Co US Inc.",
-    )
+    company = st.text_input("Company Name", key="sa_company", placeholder="e.g. Zip Co US Inc.")
 
 _missing_batch = []
 if not (cid or "").strip():     _missing_batch.append("CID")
@@ -285,10 +306,9 @@ if _missing_batch:
                  "The run command below will be missing these flags. Fill them in before copying the command.")
 
 # ---------------------------------------------------------------------------
-# Command display
+# Command & Run
 # ---------------------------------------------------------------------------
-st.divider()
-st.subheader("4 · Run This Command in Terminal")
+render_section_divider("sa", "EXECUTE", "#8338ec")
 
 _cmd_parts = [f"python3 {RUN_SCRIPT}"]
 if (cid or "").strip():
@@ -299,12 +319,10 @@ cmd = " ".join(_cmd_parts)
 st.code(cmd, language="bash")
 
 st.markdown("""
-<div style="color:#8a9bb0; font-size:0.85rem; line-height:1.7; margin-top:-6px;">
-    1. Open a Terminal.<br>
-    2. Paste the command above, hit <b>Enter</b>.<br>
-    3. Chromium opens. Log in via Okta Verify if needed, then press <b>Enter</b> in the terminal to start.<br>
-    4. Progress streams live; results save to <code>results.csv</code> after every row.<br>
-    5. When it's done, refresh this dashboard to see the results below.
+<div style="color:#8a9bb0; font-size:0.82rem; line-height:1.7; margin-top:-6px;">
+    1. Open a Terminal &rarr; paste the command above.<br>
+    2. Chromium opens &mdash; log in via Okta Verify if needed, then press <b>Enter</b> to start.<br>
+    3. Progress streams live; results save to <code>results.csv</code> after every row.
 </div>
 """, unsafe_allow_html=True)
 
@@ -324,10 +342,9 @@ if st.button("Run Now", type="primary", use_container_width=True, key="sa_run_no
     st.rerun()
 
 # ---------------------------------------------------------------------------
-# Results viewer
+# Results
 # ---------------------------------------------------------------------------
-st.divider()
-st.subheader("📊 Last Run Results")
+render_section_divider("sa", "RESULTS", "#06ffa5")
 
 if st.button("Refresh Results", key="sa_refresh"):
     st.rerun()
@@ -341,6 +358,7 @@ else:
     _mins_ago = int(_results_ago.total_seconds() / 60)
     _time_str = f"{_mins_ago} min ago" if _mins_ago < 60 else f"{_mins_ago // 60}h {_mins_ago % 60}m ago"
     st.caption(f"Results from: {datetime.fromtimestamp(_results_mtime).strftime('%I:%M %p')} ({_time_str})")
+
     try:
         df = pd.read_csv(RESULTS_PATH, dtype=str).fillna("")
     except Exception as e:
@@ -354,13 +372,15 @@ else:
         nf_n  = int((df["Status"] == "not_found").sum())
         err_n = total - ok_n - ph_n - nf_n
 
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Processed", total)
-        m2.metric("Successful", ok_n)
-        m3.metric("Placeholder", ph_n)
-        m4.metric("Not Found",  nf_n)
-        m5.metric("Errors",     err_n)
+        render_metric_row([
+            {"label": "Processed", "value": str(total), "color": "#8338ec"},
+            {"label": "Successful", "value": str(ok_n), "color": "#06ffa5"},
+            {"label": "Placeholder", "value": str(ph_n), "color": "#8a9bb0"},
+            {"label": "Not Found", "value": str(nf_n), "color": "#ffbe0b"},
+            {"label": "Errors", "value": str(err_n), "color": "#ff006e"},
+        ])
 
+        st.write("")
         filter_mode = st.radio(
             "Show",
             ["All", "Failures only", "Successes only"],
@@ -374,7 +394,7 @@ else:
         else:
             display_df = df
 
-        st.dataframe(display_df, use_container_width=True, hide_index=True, height=420)
+        render_results_table(display_df, "Status")
 
         if FAILED_PATH.exists() and FAILED_PATH.stat().st_size:
             try:
@@ -382,6 +402,7 @@ else:
             except Exception:
                 failed_rows = pd.DataFrame()
             if not failed_rows.empty:
+                st.write("")
                 render_alert("sa", "warn",
                              f"⚠ {len(failed_rows)} row(s) FAILED",
                              "Edit below to remove rows you don't want to retry.")

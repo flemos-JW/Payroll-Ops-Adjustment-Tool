@@ -1,6 +1,6 @@
 """Voucher Reversal Dashboard.
 
-Paste a 3-column table (MID, VoucherID, SettlementDate), save to vouchers.csv,
+Paste a 4-column table (MID, VoucherID, SettlementDate, AdjComment), save to vouchers.csv,
 copy the terminal command, run it. Mirror of the W-2C Automator dashboard.
 
 Launch:
@@ -18,7 +18,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 import streamlit as st
-from components import inject_global_css, render_header, render_alert
+from components import (
+    inject_global_css, render_header, render_alert, render_app_sidebar,
+    render_step_progress, render_metric_row, render_section_divider,
+    render_results_table, page_config,
+)
 
 SCRIPT_DIR    = Path(__file__).resolve().parent
 INPUT_PATH    = SCRIPT_DIR / "vouchers.csv"
@@ -26,20 +30,52 @@ RESULTS_PATH  = SCRIPT_DIR / "results.csv"
 FAILED_PATH   = SCRIPT_DIR / "failed_vouchers.csv"
 RUN_SCRIPT    = SCRIPT_DIR / "voucher_run.py"
 
-st.set_page_config(page_title="Voucher Reversal", layout="wide", page_icon="🔄")
+page_config("Voucher Reversal", "🔄")
+
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
+def _clear_data():
+    for k in list(st.session_state.keys()):
+        if k != "authenticated":
+            del st.session_state[k]
+    st.rerun()
+
+render_app_sidebar("Voucher Reversal", "v1.2", "#ffbe0b",
+                   quick_actions=[{"label": "Clear Session", "callback": _clear_data, "key": "vr_clear"}])
 
 # ---------------------------------------------------------------------------
 # Header + shared styles
 # ---------------------------------------------------------------------------
 inject_global_css("vr", accent_color="#ffbe0b")
 render_header("vr", "VOUCHER REVERSAL AUTOMATOR",
-              "PASTE TABLE · PICK SETTLEMENT DATE · COPY COMMAND · RUN IN TERMINAL",
+              "PASTE TABLE · SAVE · RUN AUTOMATION",
               accent_color="#ffbe0b", secondary_color="#ff006e", icon="\U0001f504")
+
+# ---------------------------------------------------------------------------
+# Step Progress
+# ---------------------------------------------------------------------------
+_has_data = bool(st.session_state.get("voucher_raw", "").strip())
+_has_saved = bool(st.session_state.get("vr_saved_count"))
+_has_results = RESULTS_PATH.exists()
+steps = [
+    {"label": "Paste Table", "complete": _has_data},
+    {"label": "Save", "complete": _has_saved},
+    {"label": "Run", "complete": _has_results},
+    {"label": "Results", "complete": _has_results},
+]
+_current = 0
+if steps[0]["complete"]:
+    _current = 1
+if steps[1]["complete"]:
+    _current = 2
+if steps[2]["complete"]:
+    _current = 3
+render_step_progress("vr", steps, _current, "#ffbe0b")
 
 # ---------------------------------------------------------------------------
 # Input section
 # ---------------------------------------------------------------------------
-st.subheader("1 · Paste Table")
 st.caption(
     "Expected columns: **MID**, **VoucherID**, **SettlementDate**, **AdjComment** "
     "(tab or comma separated, headers on the first line). Duplicates are auto-removed. "
@@ -66,11 +102,9 @@ def _norm(s):
 
 
 def parse_paste(text):
-    """Parse pasted text → DataFrame with columns MID, VoucherID, SettlementDate.
-    Returns (df, error_message). One of them will be None."""
+    """Parse pasted text -> DataFrame. Returns (df, error_message)."""
     if not text.strip():
         return None, None
-    # Sniff delimiter
     first = text.splitlines()[0]
     delim = "\t" if first.count("\t") >= first.count(",") else ","
     try:
@@ -80,7 +114,6 @@ def parse_paste(text):
     if df.empty:
         return None, "No rows found."
 
-    # Map columns by normalized name
     lookup = {_norm(c): c for c in df.columns}
     mid_key = lookup.get("mid") or lookup.get("memberid")
     vid_key = lookup.get("voucherid") or lookup.get("voucher")
@@ -104,7 +137,6 @@ def parse_paste(text):
         "AdjComment":     df[adj_key].astype(str).str.strip(),
     })
     out = out[out["MID"].str.len() > 0]
-    # Deduplicate on full row
     out = out.drop_duplicates().reset_index(drop=True)
     return out, None
 
@@ -123,7 +155,6 @@ with col_preview:
         st.caption("Paste a table above — preview will appear here.")
 
 with col_save:
-    st.subheader("2 · Save")
     save_disabled = parsed_df is None or parsed_df.empty
     if st.button("💾  Save to vouchers.csv",
                  type="primary",
@@ -141,21 +172,18 @@ if st.session_state.get("vr_saved_count"):
                  "")
 
 # ---------------------------------------------------------------------------
-# Command display
+# Command & Run
 # ---------------------------------------------------------------------------
-st.divider()
-st.subheader("3 · Run This Command in Terminal")
+render_section_divider("vr", "EXECUTE", "#ffbe0b")
 
 cmd = f"python3 {RUN_SCRIPT}"
 st.code(cmd, language="bash")
 
 st.markdown("""
-<div style="color:#8a9bb0; font-size:0.85rem; line-height:1.7; margin-top:-6px;">
-    1. Open a Terminal.<br>
-    2. Paste the command above, hit <b>Enter</b>.<br>
-    3. Chromium opens. Log in via Okta Verify if needed, then press <b>Enter</b> in the terminal to start.<br>
-    4. Progress streams live; results save to <code>results.csv</code> after every row.<br>
-    5. When it's done, refresh this dashboard to see the results below.
+<div style="color:#8a9bb0; font-size:0.82rem; line-height:1.7; margin-top:-6px;">
+    1. Open a Terminal &rarr; paste the command above.<br>
+    2. Chromium opens &mdash; log in via Okta Verify if needed, then press <b>Enter</b> to start.<br>
+    3. Progress streams live; results save to <code>results.csv</code> after every row.
 </div>
 """, unsafe_allow_html=True)
 
@@ -171,10 +199,9 @@ if st.button("Run Now", type="primary", use_container_width=True, key="vr_run_no
     st.rerun()
 
 # ---------------------------------------------------------------------------
-# Results viewer
+# Results
 # ---------------------------------------------------------------------------
-st.divider()
-st.subheader("📊 Last Run Results")
+render_section_divider("vr", "RESULTS", "#06ffa5")
 
 if st.button("Refresh Results", key="vr_refresh"):
     st.rerun()
@@ -198,17 +225,19 @@ else:
     if df is not None and not df.empty:
         total = len(df)
         ok_n  = int((df["Status"] == "ok").sum())
-        ph_n  = int((df["Status"] == "placeholder").sum())
+        ph_n  = int((df["Status"] == "placeholder").sum()) if "Status" in df.columns else 0
         nf_n  = int((df["Status"] == "not_found").sum())
         err_n = total - ok_n - ph_n - nf_n
 
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Processed", total)
-        m2.metric("Successful", ok_n)
-        m3.metric("Placeholder", ph_n)
-        m4.metric("Not Found",  nf_n)
-        m5.metric("Errors",     err_n)
+        render_metric_row([
+            {"label": "Processed", "value": str(total), "color": "#ffbe0b"},
+            {"label": "Successful", "value": str(ok_n), "color": "#06ffa5"},
+            {"label": "Placeholder", "value": str(ph_n), "color": "#8a9bb0"},
+            {"label": "Not Found", "value": str(nf_n), "color": "#ffbe0b"},
+            {"label": "Errors", "value": str(err_n), "color": "#ff006e"},
+        ])
 
+        st.write("")
         filter_mode = st.radio(
             "Show",
             ["All", "Failures only", "Successes only"],
@@ -222,11 +251,12 @@ else:
         else:
             display_df = df
 
-        st.dataframe(display_df, use_container_width=True, hide_index=True, height=420)
+        render_results_table(display_df, "Status")
 
         if FAILED_PATH.exists() and FAILED_PATH.stat().st_mtime >= RESULTS_PATH.stat().st_mtime:
             failed_rows = pd.read_csv(FAILED_PATH, dtype=str) if FAILED_PATH.stat().st_size else pd.DataFrame()
             if not failed_rows.empty:
+                st.write("")
                 render_alert("vr", "warn",
                              f"⚠ {len(failed_rows)} row(s) FAILED",
                              "Edit below to remove rows you don't want to retry.")

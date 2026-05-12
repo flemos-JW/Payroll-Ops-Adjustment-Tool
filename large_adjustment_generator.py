@@ -2,9 +2,13 @@ import io
 import csv
 import pandas as pd
 import streamlit as st
-from components import inject_dashboard_css, kpi_card_html, render_section_divider, render_dashboard_header
+from components import (
+    inject_dashboard_css, kpi_card_html, render_section_divider,
+    render_dashboard_header, render_auth_screen, render_app_sidebar,
+    inject_global_css, page_config,
+)
 
-st.set_page_config(page_title="Large Adjustment Generator", layout="wide")
+page_config("Large Adjustment Generator", "")
 
 
 # ---------------------------------------------------------------------------
@@ -790,24 +794,23 @@ _TICKET_NOTES = {
 # ---------------------------------------------------------------------------
 # Page setup
 # ---------------------------------------------------------------------------
-st.title("Large Adjustment Generator")
+render_auth_screen("Large Adjustment Generator", "PayOps2026")
 
 if "_clear_count" not in st.session_state:
     st.session_state._clear_count = 0
 
-with st.sidebar:
-    if st.button("Clear Data", use_container_width=True, type="primary"):
-        new_count = st.session_state._clear_count + 1
-        st.session_state.clear()
-        st.session_state._clear_count = new_count
-        st.rerun()
+def _clear_all():
+    new_count = st.session_state._clear_count + 1
+    st.session_state.clear()
+    st.session_state.authenticated = True
+    st.session_state._clear_count = new_count
+    st.rerun()
 
-st.markdown("""
-<style>
-button[data-testid="stNumberInputStepUp"],
-button[data-testid="stNumberInputStepDown"] { display: none !important; }
-</style>
-""", unsafe_allow_html=True)
+render_app_sidebar("Large Adj Generator", "v3.0", "#00e5ff",
+                   quick_actions=[{"label": "Clear Data", "callback": _clear_all,
+                                   "key": "lag_clear", "type": "primary"}])
+
+inject_global_css("lag")
 
 
 # ---------------------------------------------------------------------------
@@ -988,7 +991,7 @@ tab_settings, tab_employees, tab_dump, tab_addl, tab_custom, tab_viz = st.tabs(
 )
 
 with tab_settings:
-    st.subheader("Settings")
+    render_section_divider("lag", "SETTINGS", "#00e5ff")
 
     year_col, mode_col, eetax_col, supfit_col, split_col, incomeonly_col, futa_col = st.columns(7)
     with year_col:
@@ -1053,7 +1056,7 @@ with tab_settings:
     )
 
     st.divider()
-    st.subheader("Per-Employee Taxes")
+    render_section_divider("lag", "PER-EMPLOYEE TAXES", "#8338ec")
     st.caption("Taxes are pre-loaded from the employee's state. Add or adjust as needed per employee.")
 
     _raw_table_key = f"lag_employee_table_{st.session_state._clear_count}"
@@ -1186,7 +1189,7 @@ with tab_settings:
                     st.rerun()
 
 with tab_employees:
-    st.subheader("Employee Data")
+    render_section_divider("lag", "EMPLOYEE DATA", "#06ffa5")
     st.caption("Paste a table with columns: **MID**, **Amount**, **State**. YTD Medicare wages are pulled from the Data Dump tab.")
 
     raw_table = st.text_area(
@@ -1203,7 +1206,7 @@ with tab_employees:
 # Data Dump tab
 # ---------------------------------------------------------------------------
 with tab_dump:
-    st.subheader("Data Dump — YTD Medicare Wages")
+    render_section_divider("lag", "DATA DUMP — YTD MEDICARE WAGES", "#00e5ff")
     st.caption("Upload a CSV export. **MEMBER_ID** is used as the MID and **TOTAL_GROSS_AMOUNT** is used as YTD Medicare Wages.")
 
     uploaded = st.file_uploader("Upload CSV", type="csv", key=f"lag_dump_upload_{st.session_state._clear_count}")
@@ -1245,7 +1248,7 @@ with tab_dump:
 # Additional Taxes tab
 # ---------------------------------------------------------------------------
 with tab_addl:
-    st.subheader("Additional Taxes — Paste Table")
+    render_section_divider("lag", "ADDITIONAL TAXES", "#ffbe0b")
     st.caption(
         "Paste a table with columns **MID**, **Tax Name**, **Tax Code**. Each row is added as a "
         "write-in custom entry in the Employee Withholdings section for the matching MID."
@@ -1296,7 +1299,7 @@ with tab_addl:
 # Custom Data tab
 # ---------------------------------------------------------------------------
 with tab_custom:
-    st.subheader("Custom Data — Actual Tax Withheld")
+    render_section_divider("lag", "ACTUAL TAX WITHHELD", "#ff006e")
     st.caption(
         "Paste a table with columns **MID**, **Tax Withheld**. During calculation, the difference "
         "between the employee's calculated total tax and the actual withheld amount is applied to the "
@@ -1339,7 +1342,7 @@ with tab_custom:
             st.warning("Could not parse the pasted table. Expected headers: MID, Tax Withheld.")
 
     st.divider()
-    st.subheader("Employee Names — Display Labels")
+    render_section_divider("lag", "EMPLOYEE NAMES", "#8a9bb0")
     st.caption(
         "Optional. Paste a table with columns **MID**, **Last_Name**, **First_Name**. "
         "Names are used for display only (Settings expander labels and the Dashboard) — they do not affect "
@@ -2036,8 +2039,7 @@ with tab_viz:
 # ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
-st.divider()
-st.subheader("Results")
+render_section_divider("lag", "RESULTS", "#06ffa5")
 
 _pay_label = "Desired Net Pay" if mode == "Gross Up" else "Gross Pay"
 
@@ -2247,8 +2249,7 @@ elif run_all or "lag_results" in st.session_state:
                 st.divider()
 
         # CSV Export — per-tax rows in adjustment format (matches Gross Up Calculator)
-        st.divider()
-        st.subheader("CSV Export")
+        render_section_divider("lag", "CSV EXPORT", "#2563eb")
 
         _csv_cols = [
             "account_type", "entry_type", "adjustment_date", "amount",

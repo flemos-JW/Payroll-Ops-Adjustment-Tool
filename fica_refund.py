@@ -4,23 +4,26 @@ from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
-from components import render_validation_warning
+from components import (
+    render_validation_warning, render_auth_screen, render_app_sidebar,
+    render_header, render_section_divider, inject_global_css, page_config,
+    inject_tab_dots_css,
+)
 
-st.set_page_config(page_title="FICA Adjustment", layout="wide")
-st.title("FICA Adjustment")
+page_config("FICA Adjustment", "")
+render_auth_screen("FICA Adjustment", "PayOps2026")
 
-with st.sidebar:
-    if st.button("Clear Data", use_container_width=True, type="primary"):
-        st.session_state.clear()
-        st.rerun()
+def _clear_data():
+    st.session_state.clear()
+    st.session_state.authenticated = True
+    st.rerun()
 
-# Hide +/- stepper buttons on all number inputs
-st.markdown("""
-<style>
-button[data-testid="stNumberInputStepUp"],
-button[data-testid="stNumberInputStepDown"] { display: none !important; }
-</style>
-""", unsafe_allow_html=True)
+render_app_sidebar("FICA Adjustment", "v1.1", "#00e5ff",
+                   quick_actions=[{"label": "Clear Data", "callback": _clear_data,
+                                   "key": "fica_clear", "type": "primary"}])
+
+inject_global_css("fica")
+render_header("fica", "FICA ADJUSTMENT", "REFUND & DEBIT GENERATOR", icon="")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -60,6 +63,13 @@ COLS = [
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
+_active_tabs = []
+if st.session_state.get("quarters") and any(q.get("ss_wages", 0) for q in st.session_state.get("quarters", [])):
+    _active_tabs.append(0)
+if st.session_state.get("ficad_quarters") and any(q.get("gross", 0) for q in st.session_state.get("ficad_quarters", [])):
+    _active_tabs.append(1)
+inject_tab_dots_css(_active_tabs)
+
 tab_refund, tab_debit = st.tabs(["FICA Refund", "FICA Debit"])
 
 # -----------------------------------------------------------------------
@@ -165,14 +175,13 @@ with tab_refund:
     if _refund_alerts:
         render_validation_warning("Review the following values before downloading:", _refund_alerts)
 
-    st.divider()
-    st.subheader("Notes")
+    render_section_divider("fica", "NOTES", "#8a9bb0")
     st.session_state.notes = st.text_area(
         "Notes", value=st.session_state.notes, height=80,
         label_visibility="collapsed", placeholder="Add any notes here...",
     )
 
-    st.divider()
+    render_section_divider("fica", "PREVIEW & EXPORT", "#06ffa5")
 
     def build_quarter_rows(q, cid, mid, notes):
         adj_date_str = q["adj_date"].strftime("%m/%d/%Y")
@@ -225,7 +234,6 @@ with tab_refund:
     for q in st.session_state.quarters:
         all_rows.extend(build_quarter_rows(q, cid, mid, notes))
 
-    st.subheader("Preview")
     st.dataframe(pd.DataFrame(all_rows, columns=COLS), use_container_width=True)
 
     buf = io.StringIO()
@@ -259,15 +267,12 @@ with tab_refund:
     ]
 
     if _active_quarters:
-        st.divider()
-        st.subheader("CS Tools Adjustment Summary")
+        render_section_divider("fica", "CS TOOLS SUMMARY", "#ff006e")
 
         st.caption("Paste a CS Tools link for each quarter to make the header clickable")
         for q in _active_quarters:
             st.text_input(f"Q{q['qnum']} CS Tools Link", placeholder="Paste link here...", key=f"refund_q{q['qnum']}_link", label_visibility="visible")
         st.text_input("Credit Date", placeholder="e.g. 01/15/2025", key="refund_credit_date", label_visibility="visible")
-
-        st.divider()
 
         _credit_date = st.session_state.get("refund_credit_date", "").strip() or "XXXXX"
         _summary_html = '<div style="font-size:0.9rem; line-height:1.8;">'
@@ -464,15 +469,14 @@ with tab_debit:
             st.session_state.ficad_quarters.sort(key=lambda q: q["qnum"])
             st.rerun()
 
-    st.divider()
-    st.subheader("Notes")
+    render_section_divider("fica", "NOTES", "#8a9bb0")
     st.session_state.ficad_notes = st.text_area(
         "Notes", value=st.session_state.ficad_notes, height=80,
         label_visibility="collapsed", placeholder="Add any notes here...",
         key="ficad_notes_input",
     )
 
-    st.divider()
+    render_section_divider("fica", "PREVIEW & EXPORT", "#06ffa5")
 
     def build_ficad_quarter_rows(q, cid, mid, notes, debit_member, fica_only=False):
         adj_date_str = q["adj_date"].strftime("%m/%d/%Y")
@@ -551,7 +555,6 @@ with tab_debit:
     for q in st.session_state.ficad_quarters:
         _ficad_rows.extend(build_ficad_quarter_rows(q, _ficad_cid, _ficad_mid, _ficad_notes, _ficad_debit_member, _ficad_fica_only))
 
-    st.subheader("Preview")
     st.dataframe(pd.DataFrame(_ficad_rows, columns=COLS), use_container_width=True)
 
     ficad_buf = io.StringIO()
@@ -583,14 +586,11 @@ with tab_debit:
         if round(q["ss_tax"] + q["med_tax"], 2) > 0
     ]
     if _ficad_active_quarters:
-        st.divider()
-        st.subheader("CS Tools Adjustment Summary")
+        render_section_divider("fica", "CS TOOLS SUMMARY", "#ff006e")
         st.caption("Paste a CS Tools link for each quarter to make the header clickable")
         for q in _ficad_active_quarters:
             st.text_input(f"Q{q['qnum']} CS Tools Link", placeholder="Paste link here...", key=f"ficad_q{q['qnum']}_link", label_visibility="visible")
         st.text_input("Credit Date", placeholder="e.g. 01/15/2025", key="ficad_credit_date", label_visibility="visible")
-
-        st.divider()
 
         _ficad_debit_credit_date = st.session_state.get("ficad_credit_date", "").strip() or "XXXXX"
         _ficad_debit_fica_only   = st.session_state.ficad_fica_only == "Yes"

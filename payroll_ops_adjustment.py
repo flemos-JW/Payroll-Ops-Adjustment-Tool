@@ -1,23 +1,16 @@
 import io
 import pandas as pd
 import streamlit as st
-from components import render_breakdown_table, render_validation_warning, render_copyable_html
+from components import (
+    render_breakdown_table, render_validation_warning, render_copyable_html,
+    render_auth_screen, render_app_sidebar, render_header, render_section_divider,
+    render_metric_row, inject_global_css, page_config, inject_tab_dots_css,
+)
 
 # ---------------------------------------------------------------------------
 # Password gate
 # ---------------------------------------------------------------------------
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-if not st.session_state.authenticated:
-    st.title("Payroll Ops Adjustment Tool")
-    pw = st.text_input("Enter password", type="password")
-    if pw == "PayOps2026":
-        st.session_state.authenticated = True
-        st.rerun()
-    elif pw:
-        st.error("Incorrect password.")
-    st.stop()
+render_auth_screen("Payroll Ops Adjustment", "PayOps2026")
 
 # ---------------------------------------------------------------------------
 # SUI taxable wage bases  (hardcoded — sourced from uploaded table)
@@ -548,27 +541,25 @@ EMPLOYER_DESCRIPTIONS = [d for d in TAX_DESCRIPTIONS if "employer" in d.lower() 
 # ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
-st.set_page_config(page_title="Payroll Ops Adjustment Tool", layout="wide")
-st.title("Payroll Ops Adjustment Tool")
+page_config("Payroll Ops Adjustment", "")
 
 if "_clear_count" not in st.session_state:
     st.session_state._clear_count = 0
 
-with st.sidebar:
-    if st.button("Clear Data", use_container_width=True, type="primary"):
-        new_count = st.session_state._clear_count + 1
-        st.session_state.clear()
-        st.session_state.authenticated = True
-        st.session_state._clear_count = new_count
-        st.rerun()
+def _clear_all():
+    new_count = st.session_state._clear_count + 1
+    st.session_state.clear()
+    st.session_state.authenticated = True
+    st.session_state._clear_count = new_count
+    st.rerun()
 
-# Hide +/- stepper buttons on all number inputs across the app
-st.markdown("""
-<style>
-button[data-testid="stNumberInputStepUp"],
-button[data-testid="stNumberInputStepDown"] { display: none !important; }
-</style>
-""", unsafe_allow_html=True)
+render_app_sidebar("Payroll Ops", "v2.0", "#00e5ff",
+                   quick_actions=[{"label": "Clear Data", "callback": _clear_all,
+                                   "key": "poa_clear", "type": "primary"}])
+
+inject_global_css("poa")
+render_header("poa", "PAYROLL OPS ADJUSTMENT",
+              "CALCULATOR · FICA REFUND · FICA DEBIT", icon="")
 
 # ---------------------------------------------------------------------------
 # Session state defaults
@@ -586,6 +577,15 @@ if "extra_employer_descs" not in st.session_state:
 # ---------------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------------
+_active_tabs = []
+if "last_gross" in st.session_state:
+    _active_tabs.append(0)
+if st.session_state.get("fica_quarters") and any(q.get("ss_wages", 0) for q in st.session_state.get("fica_quarters", [])):
+    _active_tabs.append(1)
+if st.session_state.get("ficad_quarters") and any(q.get("gross", 0) for q in st.session_state.get("ficad_quarters", [])):
+    _active_tabs.append(2)
+inject_tab_dots_css(_active_tabs)
+
 tab_calc, tab_fica, tab_ficad = st.tabs(["Calculator", "FICA Refund", "FICA Debit"])
 
 # -----------------------------------------------------------------------
@@ -602,7 +602,7 @@ with tab_calc:
 # -----------------------------------------------------------------------
 with left:
     # ---- Year & YTD ----
-    st.subheader("Tax Year & YTD Wages")
+    render_section_divider("poa", "TAX YEAR & YTD WAGES", "#00e5ff")
     def _on_year_change():
         new_year  = st.session_state.calc_year
         cur_state = st.session_state.get("state", "")
@@ -627,10 +627,7 @@ with left:
     ytd_med = st.number_input("YTD Medicare Wages ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f", key=f"ytd_med_input_{st.session_state._clear_count}")
     ytd_ss  = ytd_med
 
-    st.divider()
-
-    # ---- Mode ----
-    st.subheader("Calculate")
+    render_section_divider("poa", "CALCULATION", "#06ffa5")
     mode = st.radio("Mode", ["Net Pay (enter gross)", "Gross Up (enter desired net)"], horizontal=True)
 
     if "pay_amount" not in st.session_state:
@@ -810,7 +807,7 @@ with left:
     _eff_er_descs = EMPLOYER_DESCRIPTIONS + [d for d in st.session_state.extra_employer_descs if d not in EMPLOYER_DESCRIPTIONS]
 
     # ---- Employee taxes ----
-    st.subheader("Additional Tax Rates")
+    render_section_divider("poa", "ADDITIONAL TAX RATES", "#8338ec")
     st.caption("Employee withholdings")
 
     eh1, eh2, eh3, eh4, eh5 = st.columns([3, 1.2, 1.2, 0.9, 0.4])
@@ -851,7 +848,7 @@ with left:
 # RIGHT — Results
 # -----------------------------------------------------------------------
 with right:
-    st.subheader("ADJ Info")
+    render_section_divider("poa", "ADJUSTMENT INFO", "#ffbe0b")
 
     f1, f2, f3 = st.columns([1, 1, 2])
     with f1:
@@ -966,7 +963,7 @@ with right:
                 unsafe_allow_html=True,
             )
 
-    st.subheader("Notes")
+    render_section_divider("poa", "NOTES", "#8a9bb0")
     if "notes" not in st.session_state:
         st.session_state.notes = ""
     st.session_state.notes = st.text_area(
@@ -977,17 +974,16 @@ with right:
         placeholder="Add any notes here...",
     )
 
-    st.divider()
-    st.subheader("Results")
+    render_section_divider("poa", "RESULTS", "#06ffa5")
 
     if calculate:
         if mode.startswith("Net"):
             gross  = gross_input
             result = calc_taxes(gross, ytd_ss, ytd_med, ss_wage_base, custom_rates)
-            st.metric("Net Pay", fmt(result["net"]))
+            render_metric_row([{"label": "Net Pay", "value": fmt(result["net"]), "color": "#06ffa5"}])
         else:
             gross, result = gross_up(desired_net, ytd_ss, ytd_med, ss_wage_base, custom_rates)
-            st.metric("Required Gross Pay", fmt(gross))
+            render_metric_row([{"label": "Required Gross", "value": fmt(gross), "color": "#00e5ff"}])
 
         st.session_state.last_gross          = gross
         st.session_state.last_result         = result
@@ -995,15 +991,14 @@ with right:
         st.session_state.last_employer_rates = employer_rates
 
         render_breakdown(gross, result, ss_wage_base, ytd_ss)
-        st.divider()
         render_tax_table(gross, ytd_med, ss_wage_base, result, employer_rates)
 
-        st.divider()
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Tax",      fmt(result["total_tax"]))
         eff = (result["total_tax"] / gross * 100) if gross else 0
-        c2.metric("Effective Rate", f"{eff:.2f}%")
-        c3.metric("Net Pay",        fmt(result["net"]))
+        render_metric_row([
+            {"label": "Total Tax", "value": fmt(result["total_tax"]), "color": "#ff006e"},
+            {"label": "Effective Rate", "value": f"{eff:.2f}%", "color": "#8338ec"},
+            {"label": "Net Pay", "value": fmt(result["net"]), "color": "#06ffa5"},
+        ])
 
     elif "last_gross" in st.session_state:
         _ytd = st.session_state.get("last_ytd_med", ytd_med)
@@ -1013,20 +1008,19 @@ with right:
             ss_wage_base,
             ytd_ss,
         )
-        st.divider()
         render_tax_table(st.session_state.last_gross, _ytd, ss_wage_base, st.session_state.last_result, st.session_state.get("last_employer_rates", []))
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Tax",      fmt(st.session_state.last_result["total_tax"]))
         eff = (st.session_state.last_result["total_tax"] / st.session_state.last_gross * 100) if st.session_state.last_gross else 0
-        c2.metric("Effective Rate", f"{eff:.2f}%")
-        c3.metric("Net Pay",        fmt(st.session_state.last_result["net"]))
+        render_metric_row([
+            {"label": "Total Tax", "value": fmt(st.session_state.last_result["total_tax"]), "color": "#ff006e"},
+            {"label": "Effective Rate", "value": f"{eff:.2f}%", "color": "#8338ec"},
+            {"label": "Net Pay", "value": fmt(st.session_state.last_result["net"]), "color": "#06ffa5"},
+        ])
     else:
         st.info("Configure inputs on the left and hit Calculate.")
 
     # ---- CSV Export ----
     if "last_gross" in st.session_state:
-        st.divider()
-        st.subheader("CSV Export")
+        render_section_divider("poa", "CSV EXPORT", "#2563eb")
 
         _calc_gross   = st.session_state.last_gross
         _calc_result  = st.session_state.last_result
@@ -1149,8 +1143,7 @@ with right:
             )
 
         if st.session_state.get("ticket_type") == "MDV":
-            st.divider()
-            st.subheader("CS Tools Adjustment Summary")
+            render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
 
             st.caption("Paste the CS Tools link to make the header clickable")
             st.text_input("CS Tools Link", placeholder="Paste link here...", key="calc_cs_link", label_visibility="visible")
@@ -1216,8 +1209,7 @@ with right:
             render_copyable_html(_full_copy_html, "Copy Summary to Clipboard")
 
         elif st.session_state.get("ticket_type") == "MISC Fully Taxable":
-            st.divider()
-            st.subheader("CS Tools Adjustment Summary")
+            render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
 
             st.caption("Paste the CS Tools link to make the header clickable")
             st.text_input("CS Tools Link", placeholder="Paste link here...", key="calc_cs_link", label_visibility="visible")
@@ -1401,11 +1393,10 @@ with tab_fica:
             st.session_state.fica_quarters.sort(key=lambda q: q["qnum"])
             st.rerun()
 
-    st.divider()
-    st.subheader("Notes")
+    render_section_divider("poa", "NOTES", "#8a9bb0")
     st.session_state.fica_notes = st.text_area("Notes", value=st.session_state.fica_notes, height=80, label_visibility="collapsed", placeholder="Add any notes here...", key="fica_notes_input")
 
-    st.divider()
+    render_section_divider("poa", "PREVIEW & EXPORT", "#06ffa5")
 
     # Build all rows across all quarters
     _cols = [
@@ -1469,7 +1460,6 @@ with tab_fica:
     for q in st.session_state.fica_quarters:
         _all_rows.extend(build_quarter_rows(q, _cid, _mid, _notes))
 
-    st.subheader("Preview")
     st.dataframe(pd.DataFrame(_all_rows, columns=_cols), use_container_width=True)
 
     buf = _io.StringIO()
@@ -1504,15 +1494,12 @@ with tab_fica:
     ]
 
     if _fica_active_quarters:
-        st.divider()
-        st.subheader("CS Tools Adjustment Summary")
+        render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
 
         st.caption("Paste a CS Tools link for each quarter to make the header clickable")
         for q in _fica_active_quarters:
             st.text_input(f"Q{q['qnum']} CS Tools Link", placeholder="Paste link here...", key=f"fica_q{q['qnum']}_link", label_visibility="visible")
         st.text_input("Credit Date", placeholder="e.g. 01/15/2025", key="fica_credit_date", label_visibility="visible")
-
-        st.divider()
 
         _fica_credit_date = st.session_state.get("fica_credit_date", "").strip() or "XXXXX"
         _fica_summary_html = '<div style="font-size:0.9rem; line-height:1.8;">'
@@ -1712,11 +1699,10 @@ with tab_ficad:
             st.session_state.ficad_quarters.sort(key=lambda q: q["qnum"])
             st.rerun()
 
-    st.divider()
-    st.subheader("Notes")
+    render_section_divider("poa", "NOTES", "#8a9bb0")
     st.session_state.ficad_notes = st.text_area("Notes", value=st.session_state.ficad_notes, height=80, label_visibility="collapsed", placeholder="Add any notes here...", key="ficad_notes_input")
 
-    st.divider()
+    render_section_divider("poa", "PREVIEW & EXPORT", "#06ffa5")
 
     # Build all rows across all quarters
     def build_ficad_quarter_rows(q, cid, mid, notes, debit_member, fica_only=False):
@@ -1798,7 +1784,7 @@ with tab_ficad:
     for q in st.session_state.ficad_quarters:
         _ficad_rows.extend(build_ficad_quarter_rows(q, _ficad_cid, _ficad_mid, _ficad_notes, _ficad_debit_member, _ficad_fica_only))
 
-    st.subheader("Preview")
+    st.write("")
     st.dataframe(pd.DataFrame(_ficad_rows, columns=_cols), use_container_width=True)
 
     _ficad_buf = _io.StringIO()
@@ -1830,14 +1816,11 @@ with tab_ficad:
         if round(q["ss_tax"] + q["med_tax"], 2) > 0
     ]
     if _ficad_debit_active_quarters:
-        st.divider()
-        st.subheader("CS Tools Adjustment Summary")
+        render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
         st.caption("Paste a CS Tools link for each quarter to make the header clickable")
         for q in _ficad_debit_active_quarters:
             st.text_input(f"Q{q['qnum']} CS Tools Link", placeholder="Paste link here...", key=f"ficad_q{q['qnum']}_link", label_visibility="visible")
         st.text_input("Debit Date", placeholder="e.g. 01/15/2025", key="ficad_credit_date", label_visibility="visible")
-
-        st.divider()
 
         _ficad_debit_credit_date = st.session_state.get("ficad_credit_date", "").strip() or "XXXXX"
         _ficad_debit_fica_only   = st.session_state.ficad_fica_only == "Yes"
