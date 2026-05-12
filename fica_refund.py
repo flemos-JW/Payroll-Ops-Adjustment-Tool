@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
+from components import render_validation_warning
 
 st.set_page_config(page_title="FICA Adjustment", layout="wide")
 st.title("FICA Adjustment")
@@ -162,16 +163,7 @@ with tab_refund:
             if abs(q["futa_tax"] - futa_expected) > 0.10:
                 _refund_alerts.append(f"Q{qn}: FUTA Tax is ${q['futa_tax']:.2f} but expected ${futa_expected:.2f} (0.6% of ${q['futa_wages']:,.2f})")
     if _refund_alerts:
-        alerts_html = "".join(
-            f'<p style="margin:4px 0; font-size:0.9rem; color:#b45309;">&#9888; {a}</p>'
-            for a in _refund_alerts
-        )
-        st.markdown(
-            f'<div style="background:#fffbeb; border-left:3px solid #b45309; padding:10px 14px; border-radius:4px; margin-bottom:8px;">'
-            f'<p style="margin:0 0 6px 0; font-size:0.85rem; font-weight:600; color:#b45309;">Review the following values before downloading:</p>'
-            f'{alerts_html}</div>',
-            unsafe_allow_html=True,
-        )
+        render_validation_warning("Review the following values before downloading:", _refund_alerts)
 
     st.divider()
     st.subheader("Notes")

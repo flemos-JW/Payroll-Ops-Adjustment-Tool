@@ -1,6 +1,7 @@
 import io
 import pandas as pd
 import streamlit as st
+from components import render_breakdown_table, render_validation_warning
 
 # ---------------------------------------------------------------------------
 # Password gate
@@ -1174,35 +1175,21 @@ with right:
             )
             st.markdown(_calc_summary_html, unsafe_allow_html=True)
 
-            def _brow(label, amount, bold=False):
-                amt_str = f"<b>{amount}</b>" if bold else amount
-                lbl_str = f"<b>{label}</b>"  if bold else label
-                return (f'<tr style="border-bottom:1px solid #f0f0f0;">'
-                        f'<td style="padding:7px 4px;">{lbl_str}</td>'
-                        f'<td style="text-align:right; padding:7px 8px; font-variant-numeric:tabular-nums; white-space:nowrap;">{amt_str}</td>'
-                        f'</tr>')
-
-            _bdown_html = (
-                '<table style="width:100%; border-collapse:collapse; font-family:inherit; font-size:1rem;">'
-                '<thead><tr style="border-bottom:2px solid #ccc;">'
-                '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
-                '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
-                '</tr></thead><tbody>'
-            )
-            _bdown_html += _brow("Gross Pay", fmt(_calc_gross))
-            _bdown_html += _brow("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)))
-            _bdown_html += _brow("&minus; Medicare",        fmt(-_calc_result.get("med_amount", 0)))
+            _bdown_rows = [
+                ("Gross Pay", fmt(_calc_gross), False),
+                ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
+                ("&minus; Medicare", fmt(-_calc_result.get("med_amount", 0)), False),
+            ]
             if _calc_result.get("add_med_amount", 0) > 0:
-                _bdown_html += _brow("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]))
+                _bdown_rows.append(("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]), False))
             for _ci in _calc_result.get("custom_items", []):
                 _ci_name = _ci[0]
                 _ci_amt  = _ci[4] if len(_ci) >= 6 else (_ci[3] if len(_ci) >= 4 else _ci[2])
                 if _ci_amt == 0 or _ci_name == "Federal - Employee Withholding":
                     continue
-                _bdown_html += _brow(f"&minus; {_ci_name}", fmt(-_ci_amt))
-            _bdown_html += _brow("= Net Pay",               fmt(_calc_result.get("net", 0)), bold=True)
-            _bdown_html += "</tbody></table>"
-            st.markdown(_bdown_html, unsafe_allow_html=True)
+                _bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
+            _bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
+            render_breakdown_table(_bdown_rows)
 
             st.markdown(
                 '<p style="font-size:0.9rem; margin-top:12px;">'
@@ -1245,35 +1232,21 @@ with right:
             )
             st.markdown(_misc_summary_html, unsafe_allow_html=True)
 
-            def _misc_brow(label, amount, bold=False):
-                amt_str = f"<b>{amount}</b>" if bold else amount
-                lbl_str = f"<b>{label}</b>"  if bold else label
-                return (f'<tr style="border-bottom:1px solid #f0f0f0;">'
-                        f'<td style="padding:7px 4px;">{lbl_str}</td>'
-                        f'<td style="text-align:right; padding:7px 8px; font-variant-numeric:tabular-nums; white-space:nowrap;">{amt_str}</td>'
-                        f'</tr>')
-
-            _misc_bdown_html = (
-                '<table style="width:100%; border-collapse:collapse; font-family:inherit; font-size:1rem;">'
-                '<thead><tr style="border-bottom:2px solid #ccc;">'
-                '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
-                '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
-                '</tr></thead><tbody>'
-            )
-            _misc_bdown_html += _misc_brow("Gross Pay", fmt(_calc_gross))
-            _misc_bdown_html += _misc_brow("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)))
-            _misc_bdown_html += _misc_brow("&minus; Medicare",        fmt(-_calc_result.get("med_amount", 0)))
+            _misc_bdown_rows = [
+                ("Gross Pay", fmt(_calc_gross), False),
+                ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
+                ("&minus; Medicare", fmt(-_calc_result.get("med_amount", 0)), False),
+            ]
             if _calc_result.get("add_med_amount", 0) > 0:
-                _misc_bdown_html += _misc_brow("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]))
+                _misc_bdown_rows.append(("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]), False))
             for _ci in _calc_result.get("custom_items", []):
                 _ci_name = _ci[0]
                 _ci_amt  = _ci[4] if len(_ci) >= 6 else (_ci[3] if len(_ci) >= 4 else _ci[2])
                 if _ci_amt == 0 or _ci_name == "Federal - Employee Withholding":
                     continue
-                _misc_bdown_html += _misc_brow(f"&minus; {_ci_name}", fmt(-_ci_amt))
-            _misc_bdown_html += _misc_brow("= Net Pay", fmt(_calc_result.get("net", 0)), bold=True)
-            _misc_bdown_html += "</tbody></table>"
-            st.markdown(_misc_bdown_html, unsafe_allow_html=True)
+                _misc_bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
+            _misc_bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
+            render_breakdown_table(_misc_bdown_rows)
 
             st.markdown(
                 '<p style="font-size:0.9rem; margin-top:12px;">'
@@ -1391,16 +1364,7 @@ with tab_fica:
             if abs(q["futa_tax"] - futa_expected) > 0.10:
                 _fica_alerts.append(f"Q{qn}: FUTA Tax is ${q['futa_tax']:.2f} but expected ${futa_expected:.2f} (0.6% of ${q['futa_wages']:,.2f})")
     if _fica_alerts:
-        _alerts_html = "".join(
-            f'<p style="margin:4px 0; font-size:0.9rem; color:#b45309;">&#9888; {a}</p>'
-            for a in _fica_alerts
-        )
-        st.markdown(
-            f'<div style="background:#fffbeb; border-left:3px solid #b45309; padding:10px 14px; border-radius:4px; margin-bottom:8px;">'
-            f'<p style="margin:0 0 6px 0; font-size:0.85rem; font-weight:600; color:#b45309;">Review the following values before downloading:</p>'
-            f'{_alerts_html}</div>',
-            unsafe_allow_html=True,
-        )
+        render_validation_warning("Review the following values before downloading:", _fica_alerts)
 
     if st.button("+ Add Quarter", use_container_width=True, key="fica_add_quarter"):
         _existing = {q["qnum"] for q in st.session_state.fica_quarters}

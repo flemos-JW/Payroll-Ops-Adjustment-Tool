@@ -1,0 +1,217 @@
+"""Voucher Reversal Dashboard.
+
+Paste a 3-column table (MID, VoucherID, SettlementDate), save to vouchers.csv,
+copy the terminal command, run it. Mirror of the W-2C Automator dashboard.
+
+Launch:
+    python3 -m streamlit run /Users/franciscolemos/apps/voucher_reversal/voucher_dashboard.py
+"""
+import io
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import pandas as pd
+import streamlit as st
+from components import inject_global_css, render_header, render_alert
+
+SCRIPT_DIR    = Path(__file__).resolve().parent
+INPUT_PATH    = SCRIPT_DIR / "vouchers.csv"
+RESULTS_PATH  = SCRIPT_DIR / "results.csv"
+FAILED_PATH   = SCRIPT_DIR / "failed_vouchers.csv"
+RUN_SCRIPT    = SCRIPT_DIR / "voucher_run.py"
+
+st.set_page_config(page_title="Voucher Reversal", layout="wide", page_icon="🔄")
+
+# ---------------------------------------------------------------------------
+# Header + shared styles
+# ---------------------------------------------------------------------------
+inject_global_css("vr", accent_color="#ffbe0b")
+render_header("vr", "VOUCHER REVERSAL AUTOMATOR",
+              "PASTE TABLE · PICK SETTLEMENT DATE · COPY COMMAND · RUN IN TERMINAL",
+              accent_color="#ffbe0b", secondary_color="#ff006e", icon="\U0001f504")
+
+# ---------------------------------------------------------------------------
+# Input section
+# ---------------------------------------------------------------------------
+st.subheader("1 · Paste Table")
+st.caption(
+    "Expected columns: **MID**, **VoucherID**, **SettlementDate**, **AdjComment** "
+    "(tab or comma separated, headers on the first line). Duplicates are auto-removed. "
+    "Dates in MM/DD/YYYY format."
+)
+
+raw = st.text_area(
+    "Voucher Reversal Table",
+    height=340,
+    placeholder=(
+        "MID\tVoucherID\tSettlementDate\tAdjComment\n"
+        "M123456\tV789012\t03/15/2025\tReverse per client request\n"
+        "M234567\tV890123\t03/15/2025\tDuplicate payment"
+    ),
+    label_visibility="collapsed",
+    key="voucher_raw",
+)
+
+# ---------------------------------------------------------------------------
+# Parse pasted input
+# ---------------------------------------------------------------------------
+def _norm(s):
+    return re.sub(r"[\s_]+", "", str(s).strip().lower())
+
+
+def parse_paste(text):
+    """Parse pasted text → DataFrame with columns MID, VoucherID, SettlementDate.
+    Returns (df, error_message). One of them will be None."""
+    if not text.strip():
+        return None, None
+    # Sniff delimiter
+    first = text.splitlines()[0]
+    delim = "\t" if first.count("\t") >= first.count(",") else ","
+    try:
+        df = pd.read_csv(io.StringIO(text), sep=delim, dtype=str).fillna("")
+    except Exception as e:
+        return None, f"Could not parse table: {e}"
+    if df.empty:
+        return None, "No rows found."
+
+    # Map columns by normalized name
+    lookup = {_norm(c): c for c in df.columns}
+    mid_key = lookup.get("mid") or lookup.get("memberid")
+    vid_key = lookup.get("voucherid") or lookup.get("voucher")
+    sd_key  = lookup.get("settlementdate") or lookup.get("settledate") or lookup.get("settlement")
+    adj_key = (lookup.get("adjcomment") or lookup.get("adjustmentcomment")
+               or lookup.get("comment") or lookup.get("comments")
+               or lookup.get("note") or lookup.get("notes"))
+
+    missing = []
+    if not mid_key: missing.append("MID")
+    if not vid_key: missing.append("VoucherID")
+    if not sd_key:  missing.append("SettlementDate")
+    if not adj_key: missing.append("AdjComment")
+    if missing:
+        return None, f"Missing column(s): {', '.join(missing)}"
+
+    out = pd.DataFrame({
+        "MID":            df[mid_key].astype(str).str.strip(),
+        "VoucherID":      df[vid_key].astype(str).str.strip(),
+        "SettlementDate": df[sd_key].astype(str).str.strip(),
+        "AdjComment":     df[adj_key].astype(str).str.strip(),
+    })
+    out = out[out["MID"].str.len() > 0]
+    # Deduplicate on full row
+    out = out.drop_duplicates().reset_index(drop=True)
+    return out, None
+
+
+parsed_df, parse_err = parse_paste(raw)
+
+col_preview, col_save = st.columns([2.5, 1])
+
+with col_preview:
+    if parse_err:
+        render_alert("vr", "err", "⚠ PARSE ERROR", parse_err)
+    elif parsed_df is not None and not parsed_df.empty:
+        st.caption(f"📝 **{len(parsed_df)}** unique row(s) parsed")
+        st.dataframe(parsed_df, use_container_width=True, hide_index=True, height=220)
+    else:
+        st.caption("Paste a table above — preview will appear here.")
+
+with col_save:
+    st.subheader("2 · Save")
+    save_disabled = parsed_df is None or parsed_df.empty
+    if st.button("💾  Save to vouchers.csv",
+                 type="primary",
+                 use_container_width=True,
+                 disabled=save_disabled):
+        parsed_df.to_csv(INPUT_PATH, index=False)
+        st.session_state["vr_saved_count"] = len(parsed_df)
+        st.rerun()
+    if save_disabled:
+        st.caption("⬅ Paste valid rows first")
+
+if st.session_state.get("vr_saved_count"):
+    render_alert("vr", "ok",
+                 f"✓ SAVED — {st.session_state['vr_saved_count']} row(s) written to vouchers.csv",
+                 "")
+
+# ---------------------------------------------------------------------------
+# Command display
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("3 · Run This Command in Terminal")
+
+cmd = f"python3 {RUN_SCRIPT}"
+st.code(cmd, language="bash")
+
+st.markdown("""
+<div style="color:#8a9bb0; font-size:0.85rem; line-height:1.7; margin-top:-6px;">
+    1. Open a Terminal.<br>
+    2. Paste the command above, hit <b>Enter</b>.<br>
+    3. Chromium opens. Log in via Okta Verify if needed, then press <b>Enter</b> in the terminal to start.<br>
+    4. Progress streams live; results save to <code>results.csv</code> after every row.<br>
+    5. When it's done, refresh this dashboard to see the results below.
+</div>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Results viewer
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("📊 Last Run Results")
+
+if not RESULTS_PATH.exists():
+    render_alert("vr", "info", "NO RESULTS YET",
+                 "Save rows above and run the command to populate this panel.")
+else:
+    try:
+        df = pd.read_csv(RESULTS_PATH, dtype=str).fillna("")
+    except Exception as e:
+        st.error(f"Couldn't read results.csv: {e}")
+        df = None
+
+    if df is not None and not df.empty:
+        total = len(df)
+        ok_n  = int((df["Status"] == "ok").sum())
+        ph_n  = int((df["Status"] == "placeholder").sum())
+        nf_n  = int((df["Status"] == "not_found").sum())
+        err_n = total - ok_n - ph_n - nf_n
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Processed", total)
+        m2.metric("Successful", ok_n)
+        m3.metric("Placeholder", ph_n)
+        m4.metric("Not Found",  nf_n)
+        m5.metric("Errors",     err_n)
+
+        filter_mode = st.radio(
+            "Show",
+            ["All", "Failures only", "Successes only"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        if filter_mode == "Failures only":
+            display_df = df[~df["Status"].isin(["ok", "placeholder"])]
+        elif filter_mode == "Successes only":
+            display_df = df[df["Status"] == "ok"]
+        else:
+            display_df = df
+
+        st.dataframe(display_df, use_container_width=True, hide_index=True, height=420)
+
+        if FAILED_PATH.exists() and FAILED_PATH.stat().st_mtime >= RESULTS_PATH.stat().st_mtime:
+            failed_rows = pd.read_csv(FAILED_PATH, dtype=str) if FAILED_PATH.stat().st_size else pd.DataFrame()
+            if not failed_rows.empty:
+                render_alert("vr", "warn",
+                             f"⚠ {len(failed_rows)} row(s) FAILED — RETRY COMMAND BELOW",
+                             "")
+                retry_cmd = f"python3 {RUN_SCRIPT} {FAILED_PATH}"
+                st.code(retry_cmd, language="bash")
+                st.caption(
+                    "Processes only the rows that didn't come back `ok`. "
+                    "Tip: a succeeded retry overwrites its row in results.csv."
+                )
+    else:
+        render_alert("vr", "info", "RESULTS FILE IS EMPTY", "")
