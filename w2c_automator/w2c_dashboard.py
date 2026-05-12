@@ -6,6 +6,7 @@ terminal command to run, plus results and retry commands from the last run.
 Launch:
     streamlit run /Users/franciscolemos/apps/w2c_automator/w2c_dashboard.py
 """
+import subprocess
 import sys
 from pathlib import Path
 
@@ -114,16 +115,38 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+st.caption("If Okta login is required, use the terminal command above instead.")
+if st.button("Run Now", type="primary", use_container_width=True, key="w2c_run_now"):
+    _cmd = ["python3", "w2c_run.py", str(MIDS_PATH), "--year", str(year)]
+    with st.spinner("Running W-2C automation..."):
+        _proc = subprocess.run(_cmd, capture_output=True, text=True, timeout=600, cwd=str(SCRIPT_DIR))
+    if _proc.returncode == 0:
+        render_alert("w2c", "ok", "✓ RUN COMPLETE", "Automation finished successfully. Results are below.")
+    else:
+        render_alert("w2c", "err", "⚠ RUN FAILED", f"Exit code {_proc.returncode}. Check terminal output for details.")
+    st.rerun()
+
 # ---------------------------------------------------------------------------
 # Results viewer
 # ---------------------------------------------------------------------------
 st.divider()
 st.subheader("📊 Last Run Results")
 
+if st.button("Refresh Results", key="w2c_refresh"):
+    st.rerun()
+
 if not RESULTS_PATH.exists():
     render_alert("w2c", "info", "NO RESULTS YET",
                  "Save MIDs above and run the command to populate this panel.")
 else:
+    from datetime import datetime
+    import os
+    _results_mtime = os.path.getmtime(RESULTS_PATH)
+    _results_ago = datetime.now() - datetime.fromtimestamp(_results_mtime)
+    _mins_ago = int(_results_ago.total_seconds() / 60)
+    _time_str = f"{_mins_ago} min ago" if _mins_ago < 60 else f"{_mins_ago // 60}h {_mins_ago % 60}m ago"
+    st.caption(f"Results from: {datetime.fromtimestamp(_results_mtime).strftime('%I:%M %p')} ({_time_str})")
+
     try:
         df = pd.read_csv(RESULTS_PATH, dtype=str).fillna("")
     except Exception as e:
@@ -157,17 +180,28 @@ else:
 
         st.dataframe(display_df, use_container_width=True, hide_index=True, height=420)
 
-        # Retry command if there are failures
+        # Retry section for failures
         if FAILED_PATH.exists() and FAILED_PATH.stat().st_mtime >= RESULTS_PATH.stat().st_mtime:
             failed_mids = [l.strip() for l in FAILED_PATH.read_text().splitlines() if l.strip()]
             if failed_mids:
                 render_alert("w2c", "warn",
-                             f"⚠ {len(failed_mids)} MID(s) FAILED — RETRY COMMAND BELOW", "")
+                             f"⚠ {len(failed_mids)} MID(s) FAILED", "Edit below to remove any you don't want to retry.")
+                edited_mids = st.text_area(
+                    "Failed MIDs (one per line)", value="\n".join(failed_mids),
+                    height=120, key="w2c_retry_edit")
                 retry_cmd = f"python3 {RUN_SCRIPT} {FAILED_PATH} --year {year}"
                 st.code(retry_cmd, language="bash")
-                st.caption(
-                    "Processes only the MIDs that didn't come back `ok`. "
-                    "Tip: if a MID succeeded on retry, its row in results.csv gets overwritten."
-                )
+                st.caption("Tip: if a MID succeeds on retry, its row in results.csv gets overwritten.")
+                if st.button("Retry Now", type="primary", key="w2c_retry_btn"):
+                    retry_list = [m.strip() for m in edited_mids.splitlines() if m.strip()]
+                    FAILED_PATH.write_text("\n".join(retry_list) + "\n")
+                    _retry_cmd = ["python3", "w2c_run.py", str(FAILED_PATH), "--year", str(year)]
+                    with st.spinner(f"Retrying {len(retry_list)} MID(s)..."):
+                        _rproc = subprocess.run(_retry_cmd, capture_output=True, text=True, timeout=600, cwd=str(SCRIPT_DIR))
+                    if _rproc.returncode == 0:
+                        render_alert("w2c", "ok", "✓ RETRY COMPLETE", "All retried MIDs processed.")
+                    else:
+                        render_alert("w2c", "err", "⚠ RETRY FAILED", f"Exit code {_rproc.returncode}.")
+                    st.rerun()
     else:
         render_alert("w2c", "info", "RESULTS FILE IS EMPTY", "")

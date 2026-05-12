@@ -8,9 +8,12 @@ Launch:
     python3 -m streamlit run /Users/franciscolemos/apps/state_amendments/state_amendment_dashboard.py
 """
 import io
+import os
 import re
 import shlex
+import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -305,16 +308,39 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+st.caption("If Okta login is required, use the terminal command above instead.")
+if st.button("Run Now", type="primary", use_container_width=True, key="sa_run_now"):
+    _run_cmd = ["python3", str(RUN_SCRIPT)]
+    if (cid or "").strip():
+        _run_cmd += ["--cid", cid.strip()]
+    if (company or "").strip():
+        _run_cmd += ["--company", company.strip()]
+    with st.spinner("Running state amendment automation..."):
+        _proc = subprocess.run(_run_cmd, capture_output=True, text=True, timeout=600, cwd=str(SCRIPT_DIR))
+    if _proc.returncode == 0:
+        render_alert("sa", "ok", "✓ RUN COMPLETE", "Automation finished successfully. Results are below.")
+    else:
+        render_alert("sa", "err", "⚠ RUN FAILED", f"Exit code {_proc.returncode}. Check terminal output for details.")
+    st.rerun()
+
 # ---------------------------------------------------------------------------
 # Results viewer
 # ---------------------------------------------------------------------------
 st.divider()
 st.subheader("📊 Last Run Results")
 
+if st.button("Refresh Results", key="sa_refresh"):
+    st.rerun()
+
 if not RESULTS_PATH.exists():
     render_alert("sa", "info", "NO RESULTS YET",
                  "Save rows above and run the command to populate this panel.")
 else:
+    _results_mtime = os.path.getmtime(RESULTS_PATH)
+    _results_ago = datetime.now() - datetime.fromtimestamp(_results_mtime)
+    _mins_ago = int(_results_ago.total_seconds() / 60)
+    _time_str = f"{_mins_ago} min ago" if _mins_ago < 60 else f"{_mins_ago // 60}h {_mins_ago % 60}m ago"
+    st.caption(f"Results from: {datetime.fromtimestamp(_results_mtime).strftime('%I:%M %p')} ({_time_str})")
     try:
         df = pd.read_csv(RESULTS_PATH, dtype=str).fillna("")
     except Exception as e:
@@ -357,12 +383,23 @@ else:
                 failed_rows = pd.DataFrame()
             if not failed_rows.empty:
                 render_alert("sa", "warn",
-                             f"⚠ {len(failed_rows)} row(s) FAILED — RETRY COMMAND BELOW", "")
+                             f"⚠ {len(failed_rows)} row(s) FAILED",
+                             "Edit below to remove rows you don't want to retry.")
+                edited_csv = st.text_area(
+                    "Failed rows (CSV format)", value=failed_rows.to_csv(index=False),
+                    height=150, key="sa_retry_edit")
                 retry_cmd = f"python3 {RUN_SCRIPT} {FAILED_PATH}"
                 st.code(retry_cmd, language="bash")
-                st.caption(
-                    "Processes only the rows that didn't come back `ok`. "
-                    "Tip: a succeeded retry overwrites its row in results.csv."
-                )
+                st.caption("Tip: a succeeded retry overwrites its row in results.csv.")
+                if st.button("Retry Now", type="primary", key="sa_retry_btn"):
+                    FAILED_PATH.write_text(edited_csv)
+                    _retry_cmd = ["python3", str(RUN_SCRIPT), str(FAILED_PATH)]
+                    with st.spinner(f"Retrying {len(failed_rows)} row(s)..."):
+                        _rproc = subprocess.run(_retry_cmd, capture_output=True, text=True, timeout=600, cwd=str(SCRIPT_DIR))
+                    if _rproc.returncode == 0:
+                        render_alert("sa", "ok", "✓ RETRY COMPLETE", "All retried rows processed.")
+                    else:
+                        render_alert("sa", "err", "⚠ RETRY FAILED", f"Exit code {_rproc.returncode}.")
+                    st.rerun()
     else:
         render_alert("sa", "info", "RESULTS FILE IS EMPTY", "")

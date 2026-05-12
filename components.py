@@ -153,6 +153,56 @@ def render_breakdown_table(rows: list[tuple[str, str, bool]]):
 
 
 # ---------------------------------------------------------------------------
+# Copy-to-clipboard component
+# ---------------------------------------------------------------------------
+_COPY_BUTTON_ID = 0
+
+def render_copyable_html(html_content: str, button_label: str = "Copy to Clipboard"):
+    """
+    Render HTML content with a copy button that copies rich HTML to clipboard.
+    Jira/Confluence will preserve bold, links, and line breaks on paste.
+    """
+    global _COPY_BUTTON_ID
+    _COPY_BUTTON_ID += 1
+    container_id = f"copyable-{_COPY_BUTTON_ID}"
+
+    import streamlit.components.v1 as stc
+    stc.html(f"""
+<div id="{container_id}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+     font-size: 14px; line-height: 1.8; padding: 12px 0;">
+    {html_content}
+</div>
+<button onclick="copyContent_{_COPY_BUTTON_ID}()" style="
+    margin-top: 8px; padding: 6px 14px; font-size: 0.8rem; font-weight: 600;
+    background: #f0f2f6; border: 1px solid #d1d5db; border-radius: 6px;
+    cursor: pointer; color: #374151; letter-spacing: 0.02em;
+    transition: background 0.15s;">
+    {button_label}
+</button>
+<script>
+function copyContent_{_COPY_BUTTON_ID}() {{
+    const el = document.getElementById("{container_id}");
+    const html = el.innerHTML;
+    const blob = new Blob([html], {{type: "text/html"}});
+    const plainBlob = new Blob([el.innerText], {{type: "text/plain"}});
+    const item = new ClipboardItem({{"text/html": blob, "text/plain": plainBlob}});
+    navigator.clipboard.write([item]).then(() => {{
+        const btn = event.target;
+        btn.textContent = "Copied!";
+        btn.style.background = "#d1fae5";
+        btn.style.borderColor = "#06ffa5";
+        setTimeout(() => {{
+            btn.textContent = "{button_label}";
+            btn.style.background = "#f0f2f6";
+            btn.style.borderColor = "#d1d5db";
+        }}, 1500);
+    }});
+}}
+</script>
+""", height=0, scrolling=False)
+
+
+# ---------------------------------------------------------------------------
 # CS Tools summary block (used by payroll ops calculator)
 # ---------------------------------------------------------------------------
 def render_cs_tools_summary(header_html: str, lines: list[str]):

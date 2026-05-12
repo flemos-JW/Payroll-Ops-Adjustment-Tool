@@ -1,7 +1,7 @@
 import io
 import pandas as pd
 import streamlit as st
-from components import render_breakdown_table, render_validation_warning
+from components import render_breakdown_table, render_validation_warning, render_copyable_html
 
 # ---------------------------------------------------------------------------
 # Password gate
@@ -1154,6 +1154,9 @@ with right:
 
             st.caption("Paste the CS Tools link to make the header clickable")
             st.text_input("CS Tools Link", placeholder="Paste link here...", key="calc_cs_link", label_visibility="visible")
+            _default_debit = st.session_state.adj_date.strftime("%m/%d/%Y") if "adj_date" in st.session_state and st.session_state.adj_date else ""
+            if "calc_debit_date" not in st.session_state or not st.session_state.calc_debit_date:
+                st.session_state.calc_debit_date = _default_debit
             st.text_input("Debit Date", placeholder="e.g. 01/15/2025", key="calc_debit_date", label_visibility="visible")
 
             st.divider()
@@ -1164,17 +1167,6 @@ with right:
                 f'<a href="{_calc_cs_url}" target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
                 if _calc_cs_url else 'here'
             )
-            _calc_summary_html = (
-                f'<div style="font-size:0.9rem; line-height:1.8;">'
-                f'<p style="margin:0 0 8px 0; line-height:1.4;">'
-                f'The adjustment has been completed and can be viewed {_calc_here_link}. '
-                f'The employer will be debited ${_clearing_total:,.2f} on {_calc_debit_date} '
-                f'and the admin needs to pay the employee ${_calc_result.get("net", 0):,.2f} as a non taxable payment.'
-                f'</p>'
-                f'</div>'
-            )
-            st.markdown(_calc_summary_html, unsafe_allow_html=True)
-
             _bdown_rows = [
                 ("Gross Pay", fmt(_calc_gross), False),
                 ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
@@ -1189,21 +1181,39 @@ with right:
                     continue
                 _bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
             _bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
-            render_breakdown_table(_bdown_rows)
 
-            st.markdown(
-                '<p style="font-size:0.9rem; margin-top:12px;">'
-                'The SOP for refunding benefit deductions can be found '
-                '<a href="https://justworks.atlassian.net/wiki/spaces/CX/pages/474644752/Refunding+Benefits+Deductions" '
-                'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
-                ' for your reference.</p>'
-                '<p style="font-size:0.9rem; margin-top:4px;">'
-                'Visit our team\'s page '
-                '<a href="https://justworks.atlassian.net/wiki/spaces/PAY/pages/1951466586/Payroll+Operations+Team+-+PTU" '
-                'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
-                '.</p>',
-                unsafe_allow_html=True,
+            _bdown_table_html = (
+                '<table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:8px;">'
+                '<thead><tr style="border-bottom:2px solid #ccc;">'
+                '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
+                '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
+                '</tr></thead><tbody>'
             )
+            for _lbl, _amt, _bold in _bdown_rows:
+                _a = f"<b>{_amt}</b>" if _bold else _amt
+                _l = f"<b>{_lbl}</b>" if _bold else _lbl
+                _bdown_table_html += f'<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:7px 4px;">{_l}</td><td style="text-align:right; padding:7px 8px;">{_a}</td></tr>'
+            _bdown_table_html += "</tbody></table>"
+
+            _full_copy_html = (
+                f'<p style="margin:0 0 8px 0; line-height:1.4;">'
+                f'The adjustment has been completed and can be viewed {_calc_here_link}. '
+                f'The employer will be debited ${_clearing_total:,.2f} on {_calc_debit_date} '
+                f'and the admin needs to pay the employee ${_calc_result.get("net", 0):,.2f} as a non taxable payment.'
+                f'</p>'
+                f'{_bdown_table_html}'
+                f'<p style="font-size:0.9rem; margin-top:12px;">'
+                f'The SOP for refunding benefit deductions can be found '
+                f'<a href="https://justworks.atlassian.net/wiki/spaces/CX/pages/474644752/Refunding+Benefits+Deductions" '
+                f'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
+                f' for your reference.</p>'
+                f'<p style="font-size:0.9rem; margin-top:4px;">'
+                f'Visit our team\'s page '
+                f'<a href="https://justworks.atlassian.net/wiki/spaces/PAY/pages/1951466586/Payroll+Operations+Team+-+PTU" '
+                f'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
+                f'.</p>'
+            )
+            render_copyable_html(_full_copy_html, "Copy Summary to Clipboard")
 
         elif st.session_state.get("ticket_type") == "MISC Fully Taxable":
             st.divider()
@@ -1221,17 +1231,6 @@ with right:
                 f'<a href="{_misc_cs_url}" target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">ADJ in CS Tools</a>'
                 if _misc_cs_url else '<strong>ADJ in CS Tools</strong>'
             )
-            _misc_summary_html = (
-                f'<div style="font-size:0.9rem; line-height:1.8;">'
-                f'<p style="margin:0 0 8px 0; line-height:1.4;">The adjustment has been completed and can be viewed below:</p>'
-                f'<p style="margin:0 0 8px 0; line-height:1.4;">'
-                f'{_misc_adj_header}<br>'
-                f'Employer Debit: ${_clearing_total:,.2f} on {_misc_debit_date}'
-                f'</p>'
-                f'</div>'
-            )
-            st.markdown(_misc_summary_html, unsafe_allow_html=True)
-
             _misc_bdown_rows = [
                 ("Gross Pay", fmt(_calc_gross), False),
                 ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
@@ -1246,16 +1245,29 @@ with right:
                     continue
                 _misc_bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
             _misc_bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
-            render_breakdown_table(_misc_bdown_rows)
 
-            st.markdown(
-                '<p style="font-size:0.9rem; margin-top:12px;">'
-                'Visit our team\'s page '
-                '<a href="https://justworks.atlassian.net/wiki/spaces/PAY/pages/1951466586/Payroll+Operations+Team+-+PTU" '
-                'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
-                '.</p>',
-                unsafe_allow_html=True,
+            _misc_table_html = (
+                '<table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:8px;">'
+                '<thead><tr style="border-bottom:2px solid #ccc;">'
+                '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
+                '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
+                '</tr></thead><tbody>'
             )
+            for _lbl, _amt, _bold in _misc_bdown_rows:
+                _a = f"<b>{_amt}</b>" if _bold else _amt
+                _l = f"<b>{_lbl}</b>" if _bold else _lbl
+                _misc_table_html += f'<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:7px 4px;">{_l}</td><td style="text-align:right; padding:7px 8px;">{_a}</td></tr>'
+            _misc_table_html += "</tbody></table>"
+
+            _misc_full_copy_html = (
+                f'<p style="margin:0 0 8px 0; line-height:1.4;">The adjustment has been completed and can be viewed below:</p>'
+                f'<p style="margin:0 0 8px 0; line-height:1.4;">'
+                f'{_misc_adj_header}<br>'
+                f'Employer Debit: ${_clearing_total:,.2f} on {_misc_debit_date}'
+                f'</p>'
+                f'{_misc_table_html}'
+            )
+            render_copyable_html(_misc_full_copy_html, "Copy Summary to Clipboard")
 
 # -----------------------------------------------------------------------
 # TAB 2 — FICA Refund
@@ -1332,14 +1344,23 @@ with tab_fica:
             with ss_col:
                 st.caption("**Social Security**")
                 q["ss_wages"] = st.number_input("SS Wages ($)", min_value=0.0, value=q["ss_wages"], step=0.01, format="%.2f", key=f"fica_ss_wages_{qn}")
+                _ss_auto = round(q["ss_wages"] * 0.062, 2)
+                if q["ss_tax"] == 0.0 and q["ss_wages"] > 0:
+                    q["ss_tax"] = _ss_auto
                 q["ss_tax"]   = st.number_input("SS Tax ($)",   min_value=0.0, value=q["ss_tax"],   step=0.01, format="%.2f", key=f"fica_ss_tax_{qn}")
             with med_col:
                 st.caption("**Medicare**")
                 q["med_wages"] = st.number_input("Medicare Wages ($)", min_value=0.0, value=q["med_wages"], step=0.01, format="%.2f", key=f"fica_med_wages_{qn}")
+                _med_auto = round(q["med_wages"] * 0.0145, 2)
+                if q["med_tax"] == 0.0 and q["med_wages"] > 0:
+                    q["med_tax"] = _med_auto
                 q["med_tax"]   = st.number_input("Medicare Tax ($)",   min_value=0.0, value=q["med_tax"],   step=0.01, format="%.2f", key=f"fica_med_tax_{qn}")
             with futa_col:
                 st.caption("**FUTA**")
                 q["futa_wages"] = st.number_input("FUTA Wages ($)", min_value=0.0, value=q["futa_wages"], step=0.01, format="%.2f", key=f"fica_futa_wages_{qn}")
+                _futa_auto = round(q["futa_wages"] * 0.006, 2)
+                if q["futa_tax"] == 0.0 and q["futa_wages"] > 0:
+                    q["futa_tax"] = _futa_auto
                 q["futa_tax"]   = st.number_input("FUTA Tax ($)",   min_value=0.0, value=q["futa_tax"],   step=0.01, format="%.2f", key=f"fica_futa_tax_{qn}")
 
             _dk = f"fica_adj_date_{qn}_v{st.session_state.fica_year_version}"
