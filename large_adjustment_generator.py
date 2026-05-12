@@ -986,8 +986,8 @@ def _tax_rows(taxes, key_prefix, descriptions, allow_no_limit_flag=False, state_
 # ---------------------------------------------------------------------------
 # Layout: tabs — Settings | Employee Data | Data Dump
 # ---------------------------------------------------------------------------
-tab_settings, tab_employees, tab_dump, tab_addl, tab_custom, tab_viz = st.tabs(
-    ["Settings", "Employee Data", "Data Dump", "Additional Taxes", "Custom Data", "Dashboard"]
+tab_settings, tab_employees, tab_dump, tab_addl, tab_custom, tab_results, tab_viz = st.tabs(
+    ["Settings", "Employee Data", "Data Dump", "Additional Taxes", "Custom Data", "Results", "Dashboard"]
 )
 
 with tab_settings:
@@ -1200,7 +1200,6 @@ with tab_employees:
         key=f"lag_employee_table_{st.session_state._clear_count}",
     )
 
-    run_all = st.button("Generate Results", type="primary", use_container_width=True, key="lag_run")
 
 # ---------------------------------------------------------------------------
 # Data Dump tab
@@ -2037,402 +2036,405 @@ with tab_viz:
 
 
 # ---------------------------------------------------------------------------
-# Results
+# Results tab
 # ---------------------------------------------------------------------------
-render_section_divider("lag", "RESULTS", "#06ffa5")
+with tab_results:
+    run_all = st.button("Generate Results", type="primary", use_container_width=True, key="lag_run")
 
-_pay_label = "Desired Net Pay" if mode == "Gross Up" else "Gross Pay"
+    render_section_divider("lag", "RESULTS", "#06ffa5")
 
-emp_df = parse_pasted_table(raw_table, ["mid", "pay_amount", "state"])
+    _pay_label = "Desired Net Pay" if mode == "Gross Up" else "Gross Pay"
 
-if not run_all and "lag_results" not in st.session_state:
-    st.info("Configure settings, paste employee data, and click **Generate Results**.")
-elif run_all or "lag_results" in st.session_state:
-    if run_all:
-        if emp_df is None or emp_df.empty:
-            st.warning("No valid employee data found. Check the pasted table format.")
-            st.stop()
-
-        rows   = []
-        detail = []
-        errors = []
-        _ytd_lookup          = st.session_state.get("lag_ytd_lookup", {})
-        _shared_cid          = st.session_state.get("lag_cid", "")
-        _notes_joined        = " ".join(st.session_state.lag_notes.splitlines()).strip()
-        _adj_date_str        = adj_date.strftime("%m/%d/%Y")
-        _tax_withheld_by_mid = st.session_state.get("lag_tax_withheld_by_mid", {})
-
-        # Aggregate employee rows by MID — duplicate MIDs get their pay amounts summed;
-        # the first-seen state is kept (state shouldn't change between rows for the same MID).
-        # State is normalized: abbreviations like "CA" are expanded to full names ("California")
-        # so downstream views (dashboard map, per-state aggregates) can match on full name.
-        _emp_by_mid = {}
-        for _, row in emp_df.iterrows():
-            _m = str(row["mid"]).strip()
-            if not _m:
-                continue
-            _st_raw = str(row.get("state", "")).strip()
-            _st     = STATE_ABBREV.get(_st_raw.upper(), _st_raw) if _st_raw else _st_raw
-            try:
-                _pay = float(str(row["pay_amount"]).replace(",", "").replace("$", ""))
-            except ValueError:
-                errors.append(f"Row {_m}: could not parse amount.")
-                continue
-            if _m in _emp_by_mid:
-                _emp_by_mid[_m]["pay_amount"] += _pay
-            else:
-                _emp_by_mid[_m] = {"state": _st, "pay_amount": _pay}
-
-        for mid, _emp_data in _emp_by_mid.items():
-            emp_state  = _emp_data["state"]
-            pay_amount = _emp_data["pay_amount"]
-
-            ytd_med = _ytd_lookup.get(mid, 0.0)
-            if mid not in _ytd_lookup:
-                errors.append(f"MID {mid}: not found in Data Dump — using $0.00 YTD Medicare wages.")
-
-            ytd_ss = ytd_med
-
-            # Build per-employee rates
-            _safe_mid         = "".join(c if c.isalnum() else "_" for c in mid)
-            combined_ee_rates = _build_rates(st.session_state.get(f"lag_pe_{_safe_mid}_ee_taxes", []))
-            combined_er_rates = _build_rates(st.session_state.get(f"lag_pe_{_safe_mid}_er_taxes", []))
-
-            if mode == "Gross Up":
-                gross, result = gross_up(pay_amount, ytd_ss, ytd_med, ss_wage_base, combined_ee_rates)
-            else:
-                gross  = pay_amount
-                result = calc_taxes(gross, ytd_ss, ytd_med, ss_wage_base, combined_ee_rates)
-
-            # FUTA toggle — when disabled, zero out so downstream views / CSV drop 00-402
-            _include_futa_calc = st.session_state.get("lag_include_futa", "Yes") == "Yes"
-            if not _include_futa_calc:
-                result["futa_amount"]  = 0.0
-                result["futa_taxable"] = 0.0
-
-            # Custom Data override — adjust state -450 (or 00-400) to match actual withheld total
-            _target_withheld = _tax_withheld_by_mid.get(mid)
-            _adjustment_info = None
-            if _target_withheld is not None:
-                _calc_before = float(result["total_tax"])
-                _diff        = round(float(_target_withheld) - _calc_before, 2)
-                if _diff != 0:
-                    _new_items = list(result["custom_items"])
-                    _applied   = None
-                    # Prefer state withholding (any code ending in -450)
-                    for _i, _it in enumerate(_new_items):
-                        _nm, _cd, _rt, _tx, _am, _ytd = _it
-                        if _cd and _cd.endswith("-450"):
-                            _new_amt = round(_am + _diff, 2)
-                            _new_items[_i] = (_nm, _cd, _rt, _tx, _new_amt, _ytd)
-                            _applied = {"location": "state_450", "tax_name": _nm, "tax_code": _cd,
-                                        "prev_amount": float(_am), "new_amount": _new_amt}
-                            break
-                    # Fall back to Federal Withholding (00-400)
-                    if _applied is None:
+    emp_df = parse_pasted_table(raw_table, ["mid", "pay_amount", "state"])
+    
+    if not run_all and "lag_results" not in st.session_state:
+        st.info("Configure settings, paste employee data, and click **Generate Results**.")
+    elif run_all or "lag_results" in st.session_state:
+        if run_all:
+            if emp_df is None or emp_df.empty:
+                st.warning("No valid employee data found. Check the pasted table format.")
+                st.stop()
+    
+            rows   = []
+            detail = []
+            errors = []
+            _ytd_lookup          = st.session_state.get("lag_ytd_lookup", {})
+            _shared_cid          = st.session_state.get("lag_cid", "")
+            _notes_joined        = " ".join(st.session_state.lag_notes.splitlines()).strip()
+            _adj_date_str        = adj_date.strftime("%m/%d/%Y")
+            _tax_withheld_by_mid = st.session_state.get("lag_tax_withheld_by_mid", {})
+    
+            # Aggregate employee rows by MID — duplicate MIDs get their pay amounts summed;
+            # the first-seen state is kept (state shouldn't change between rows for the same MID).
+            # State is normalized: abbreviations like "CA" are expanded to full names ("California")
+            # so downstream views (dashboard map, per-state aggregates) can match on full name.
+            _emp_by_mid = {}
+            for _, row in emp_df.iterrows():
+                _m = str(row["mid"]).strip()
+                if not _m:
+                    continue
+                _st_raw = str(row.get("state", "")).strip()
+                _st     = STATE_ABBREV.get(_st_raw.upper(), _st_raw) if _st_raw else _st_raw
+                try:
+                    _pay = float(str(row["pay_amount"]).replace(",", "").replace("$", ""))
+                except ValueError:
+                    errors.append(f"Row {_m}: could not parse amount.")
+                    continue
+                if _m in _emp_by_mid:
+                    _emp_by_mid[_m]["pay_amount"] += _pay
+                else:
+                    _emp_by_mid[_m] = {"state": _st, "pay_amount": _pay}
+    
+            for mid, _emp_data in _emp_by_mid.items():
+                emp_state  = _emp_data["state"]
+                pay_amount = _emp_data["pay_amount"]
+    
+                ytd_med = _ytd_lookup.get(mid, 0.0)
+                if mid not in _ytd_lookup:
+                    errors.append(f"MID {mid}: not found in Data Dump — using $0.00 YTD Medicare wages.")
+    
+                ytd_ss = ytd_med
+    
+                # Build per-employee rates
+                _safe_mid         = "".join(c if c.isalnum() else "_" for c in mid)
+                combined_ee_rates = _build_rates(st.session_state.get(f"lag_pe_{_safe_mid}_ee_taxes", []))
+                combined_er_rates = _build_rates(st.session_state.get(f"lag_pe_{_safe_mid}_er_taxes", []))
+    
+                if mode == "Gross Up":
+                    gross, result = gross_up(pay_amount, ytd_ss, ytd_med, ss_wage_base, combined_ee_rates)
+                else:
+                    gross  = pay_amount
+                    result = calc_taxes(gross, ytd_ss, ytd_med, ss_wage_base, combined_ee_rates)
+    
+                # FUTA toggle — when disabled, zero out so downstream views / CSV drop 00-402
+                _include_futa_calc = st.session_state.get("lag_include_futa", "Yes") == "Yes"
+                if not _include_futa_calc:
+                    result["futa_amount"]  = 0.0
+                    result["futa_taxable"] = 0.0
+    
+                # Custom Data override — adjust state -450 (or 00-400) to match actual withheld total
+                _target_withheld = _tax_withheld_by_mid.get(mid)
+                _adjustment_info = None
+                if _target_withheld is not None:
+                    _calc_before = float(result["total_tax"])
+                    _diff        = round(float(_target_withheld) - _calc_before, 2)
+                    if _diff != 0:
+                        _new_items = list(result["custom_items"])
+                        _applied   = None
+                        # Prefer state withholding (any code ending in -450)
                         for _i, _it in enumerate(_new_items):
                             _nm, _cd, _rt, _tx, _am, _ytd = _it
-                            if _cd == "00-400":
+                            if _cd and _cd.endswith("-450"):
                                 _new_amt = round(_am + _diff, 2)
                                 _new_items[_i] = (_nm, _cd, _rt, _tx, _new_amt, _ytd)
-                                _applied = {"location": "federal_00_400", "tax_name": _nm, "tax_code": _cd,
+                                _applied = {"location": "state_450", "tax_name": _nm, "tax_code": _cd,
                                             "prev_amount": float(_am), "new_amount": _new_amt}
                                 break
-                    # Create a Federal Withholding line if neither exists yet
-                    if _applied is None:
-                        _new_items.append(
-                            ("Federal - Employee Withholding", "00-400", 0.0, gross, round(_diff, 2), None)
+                        # Fall back to Federal Withholding (00-400)
+                        if _applied is None:
+                            for _i, _it in enumerate(_new_items):
+                                _nm, _cd, _rt, _tx, _am, _ytd = _it
+                                if _cd == "00-400":
+                                    _new_amt = round(_am + _diff, 2)
+                                    _new_items[_i] = (_nm, _cd, _rt, _tx, _new_amt, _ytd)
+                                    _applied = {"location": "federal_00_400", "tax_name": _nm, "tax_code": _cd,
+                                                "prev_amount": float(_am), "new_amount": _new_amt}
+                                    break
+                        # Create a Federal Withholding line if neither exists yet
+                        if _applied is None:
+                            _new_items.append(
+                                ("Federal - Employee Withholding", "00-400", 0.0, gross, round(_diff, 2), None)
+                            )
+                            _applied = {"location": "new_federal_00_400", "tax_name": "Federal - Employee Withholding",
+                                        "tax_code": "00-400", "prev_amount": 0.0, "new_amount": round(_diff, 2)}
+                        result["custom_items"] = _new_items
+                        result["total_tax"] = round(
+                            result["ss_amount"] + result["med_amount"] + result["add_med_amount"]
+                            + sum(_it[4] for _it in _new_items), 2
                         )
-                        _applied = {"location": "new_federal_00_400", "tax_name": "Federal - Employee Withholding",
-                                    "tax_code": "00-400", "prev_amount": 0.0, "new_amount": round(_diff, 2)}
-                    result["custom_items"] = _new_items
-                    result["total_tax"] = round(
-                        result["ss_amount"] + result["med_amount"] + result["add_med_amount"]
-                        + sum(_it[4] for _it in _new_items), 2
-                    )
-                    result["net"] = round(gross - result["total_tax"], 2)
-                    _adjustment_info = {
-                        "applied":          True,
-                        "calculated_total": _calc_before,
-                        "target_withheld":  float(_target_withheld),
-                        "diff":             _diff,
-                        **_applied,
-                    }
-                else:
-                    _adjustment_info = {
-                        "applied":          False,
-                        "calculated_total": _calc_before,
-                        "target_withheld":  float(_target_withheld),
-                        "diff":             0.0,
-                    }
-
-            er_total = 0.0
-            for name, code, rate, limit_room, ytd_display in combined_er_rates:
-                taxable   = min(gross, limit_room) if limit_room is not None else gross
-                er_total += round(taxable * rate / 100, 2)
-
-            custom_ee_total = sum(item[4] for item in result["custom_items"])
-
-            out_row = {
-                "MID":                    mid,
-                "CID":                    _shared_cid,
-                "State":                  emp_state,
-                "Gross Pay":              gross,
-                "Net Pay":                result["net"],
-                "YTD Medicare Wages":     ytd_med,
-                "SS Employee":            result["ss_amount"],
-                "Medicare Employee":      result["med_amount"],
-                "Add. Medicare Employee": result["add_med_amount"],
-                "FUTA":                   result["futa_amount"],
-                "Additional EE Taxes":    custom_ee_total,
-                "Total Employee Tax":     result["total_tax"],
-                "Employer Taxes":         er_total,
-                "Adj Date":               adj_date.strftime("%m/%d/%Y"),
-                "Notes":                  st.session_state.lag_notes,
-                "Tax Year":               year,
-            }
-            rows.append(out_row)
-
-            detail.append({
-                "mid":        mid,
-                "cid":        _shared_cid,
-                "gross":      gross,
-                "result":     result,
-                "er_rates":   combined_er_rates,
-                "notes":      _notes_joined,
-                "adj_date":   _adj_date_str,
-                "adjustment": _adjustment_info,
-            })
-
-        if errors:
-            for e in errors:
-                st.warning(e)
-
-        st.session_state.lag_results = rows
-        st.session_state.lag_detail  = detail
-
-    rows = st.session_state.get("lag_results", [])
-    if not rows:
-        st.info("No results to display.")
-    else:
-        results_df = pd.DataFrame(rows)
-
-        # Summary metrics
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Employees", len(results_df))
-        m2.metric("Total Gross", fmt(results_df["Gross Pay"].sum()))
-        m3.metric("Total Net",   fmt(results_df["Net Pay"].sum()))
-        m4.metric("Total EE Tax", fmt(results_df["Total Employee Tax"].sum()))
-
-        st.divider()
-
-        # Display table with currency formatting
-        display_df = results_df.copy()
-        for col in ["Gross Pay", "Net Pay", "YTD Medicare Wages", "SS Employee", "Medicare Employee",
-                    "Add. Medicare Employee", "FUTA", "Additional EE Taxes",
-                    "Total Employee Tax", "Employer Taxes"]:
-            display_df[col] = display_df[col].apply(lambda x: fmt(float(x)))
-
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-        st.divider()
-
-        # Per-employee breakdown expanders
-        with st.expander("Per-Employee Breakdown"):
-            for row in rows:
-                st.markdown(f"**{row['MID']}** ({row['State']}) — Gross: {fmt(row['Gross Pay'])} | Net: {fmt(row['Net Pay'])} | YTD Med: {fmt(row['YTD Medicare Wages'])}")
-                cols = st.columns(4)
-                cols[0].metric("SS", fmt(row["SS Employee"]))
-                cols[1].metric("Medicare", fmt(row["Medicare Employee"]))
-                cols[2].metric("Add. Medicare", fmt(row["Add. Medicare Employee"]))
-                cols[3].metric("FUTA", fmt(row["FUTA"]))
-                st.divider()
-
-        # CSV Export — per-tax rows in adjustment format (matches Gross Up Calculator)
-        render_section_divider("lag", "CSV EXPORT", "#2563eb")
-
-        _csv_cols = [
-            "account_type", "entry_type", "adjustment_date", "amount",
-            "cid", "tax_code", "member_id", "taxable_amount", "subj_gross",
-            "adjusted_gross", "adjusted_supl_gross", "gross_earnings_amount",
-            "reference_type", "reference_id", "notes",
-        ]
-
-        def _fmt_num(v):
-            return round(v, 2) if isinstance(v, (int, float)) else v
-
-        csv_rows   = []
-        csv_groups = []   # one entry per employee: {"mid", "debit", "rows"} — used for Split CSV
-        for d in st.session_state.get("lag_detail", []):
-            _g        = d["gross"]
-            _res      = d["result"]
-            _er       = d["er_rates"]
-            _mid_out  = d["mid"].lstrip("M").lstrip("m")
-            _cid_out  = d["cid"].lstrip("C").lstrip("c")
-            _notes_out = d["notes"]
-            _date_out  = d["adj_date"]
-
-            def _mk_row(account_type, entry_type, amount, tax_code, member_id,
-                        taxable, subj_gross, adj_gross, adj_supl, gross_earnings,
-                        ref_type, ref_id,
-                        _date_out=_date_out, _cid_out=_cid_out, _notes_out=_notes_out):
-                return {
-                    "account_type": account_type, "entry_type": entry_type,
-                    "adjustment_date": _date_out, "amount": _fmt_num(amount),
-                    "cid": _cid_out, "tax_code": tax_code, "member_id": member_id,
-                    "taxable_amount": _fmt_num(taxable), "subj_gross": _fmt_num(subj_gross),
-                    "adjusted_gross": _fmt_num(adj_gross), "adjusted_supl_gross": _fmt_num(adj_supl),
-                    "gross_earnings_amount": _fmt_num(gross_earnings),
-                    "reference_type": ref_type, "reference_id": ref_id, "notes": _notes_out,
+                        result["net"] = round(gross - result["total_tax"], 2)
+                        _adjustment_info = {
+                            "applied":          True,
+                            "calculated_total": _calc_before,
+                            "target_withheld":  float(_target_withheld),
+                            "diff":             _diff,
+                            **_applied,
+                        }
+                    else:
+                        _adjustment_info = {
+                            "applied":          False,
+                            "calculated_total": _calc_before,
+                            "target_withheld":  float(_target_withheld),
+                            "diff":             0.0,
+                        }
+    
+                er_total = 0.0
+                for name, code, rate, limit_room, ytd_display in combined_er_rates:
+                    taxable   = min(gross, limit_room) if limit_room is not None else gross
+                    er_total += round(taxable * rate / 100, 2)
+    
+                custom_ee_total = sum(item[4] for item in result["custom_items"])
+    
+                out_row = {
+                    "MID":                    mid,
+                    "CID":                    _shared_cid,
+                    "State":                  emp_state,
+                    "Gross Pay":              gross,
+                    "Net Pay":                result["net"],
+                    "YTD Medicare Wages":     ytd_med,
+                    "SS Employee":            result["ss_amount"],
+                    "Medicare Employee":      result["med_amount"],
+                    "Add. Medicare Employee": result["add_med_amount"],
+                    "FUTA":                   result["futa_amount"],
+                    "Additional EE Taxes":    custom_ee_total,
+                    "Total Employee Tax":     result["total_tax"],
+                    "Employer Taxes":         er_total,
+                    "Adj Date":               adj_date.strftime("%m/%d/%Y"),
+                    "Notes":                  st.session_state.lag_notes,
+                    "Tax Year":               year,
                 }
-
-            def _cr(tax_code, amount, taxable, gross_earnings=0.0,
-                    _g=_g, _mid_out=_mid_out):
-                return _mk_row("Clearing", "Credit", amount, tax_code, _mid_out,
-                               taxable, _g, taxable, 0.0, gross_earnings, "x", 1)
-
-            _emp_rows = []
-
-            # Federal Withholding (00-400) — always included
-            _fed_item = next((it for it in _res.get("custom_items", []) if it[0] == "Federal - Employee Withholding"), None)
-            _fed_amt  = 0.0
-            if _fed_item:
-                _fed_amt = _fed_item[4] if len(_fed_item) >= 6 else _fed_item[3]
-            _emp_rows.append(_cr("00-400", _fed_amt, _g))
-
-            # SS Employee / Employer (00-403 / 00-404)
-            _emp_rows.append(_cr("00-403", _res.get("ss_amount", 0), _res.get("ss_taxable", 0)))
-            _emp_rows.append(_cr("00-404", _res.get("ss_amount", 0), _res.get("ss_taxable", 0)))
-
-            # Medicare Employee (00-406)
-            _emp_rows.append(_cr("00-406", _res.get("med_amount", 0), _g))
-
-            # Additional Medicare (00-901) — only when taxable > 0
-            if _res.get("add_med_taxable", 0) > 0:
-                _emp_rows.append(_cr("00-901", _res["add_med_amount"], _res["add_med_taxable"]))
-
-            # Medicare Employer (00-407)
-            _emp_rows.append(_cr("00-407", _res.get("med_amount", 0), _g))
-
-            # FUTA (00-402) — skipped entirely when the FUTA toggle is No;
-            # otherwise, when fully over wage base, use gross_earnings_amount
-            _include_futa_csv = st.session_state.get("lag_include_futa", "Yes") == "Yes"
-            if _include_futa_csv:
-                _futa_taxable = _res.get("futa_taxable", 0)
-                _futa_amount  = _res.get("futa_amount", 0)
-                if _futa_taxable == 0:
-                    _emp_rows.append(_cr("00-402", _futa_amount, 0, gross_earnings=_g))
-                else:
-                    _emp_rows.append(_cr("00-402", _futa_amount, _futa_taxable))
-
-            # Employee custom taxes (excluding Federal Withholding, already emitted)
-            for item in _res.get("custom_items", []):
-                if item[0] == "Federal - Employee Withholding":
-                    continue
-                _code    = item[1] if len(item) >= 6 else DESC_TO_CODE.get(item[0], "")
-                _taxable = item[3] if len(item) >= 6 else item[2]
-                _amt     = item[4] if len(item) >= 6 else (item[3] if len(item) >= 4 else item[2])
-                _emp_rows.append(_cr(_code, _amt, _taxable))
-
-            # Employer custom taxes
-            for _name, _code, _rate, _limit_room, _ytd_display in _er:
-                _taxable = min(_g, _limit_room) if _limit_room is not None else _g
-                _amt     = round(_taxable * _rate / 100, 2)
-                _emp_rows.append(_cr(_code, _amt, _taxable))
-
-            # Per-employee clearing total — used for partitioning and the final debit roll-up.
-            # The Company/Debit line itself is now a single consolidated row at the end of each CSV.
-            _clearing_total = round(sum(r["amount"] for r in _emp_rows), 2)
-
-            csv_rows.extend(_emp_rows)
-            csv_groups.append({"mid": d["mid"], "debit": _clearing_total, "rows": list(_emp_rows)})
-
-        if csv_rows:
-            _split_mode = st.session_state.get("lag_split_csv", "No") == "Yes"
-            _cid_base   = st.session_state.get("lag_cid", "").strip()
-
-            def _make_debit_row(clearing_rows):
-                """Single consolidated Company/Debit row summing every Clearing/Credit amount in the CSV."""
-                _amounts = [r.get("amount", 0) for r in clearing_rows]
-                _sum     = round(sum(a for a in _amounts if isinstance(a, (int, float))), 2)
-                _first   = clearing_rows[0] if clearing_rows else {}
-                return {
-                    "account_type":          "Company",
-                    "entry_type":            "Debit",
-                    "adjustment_date":       _first.get("adjustment_date", ""),
-                    "amount":                _sum,
-                    "cid":                   _first.get("cid", ""),
-                    "tax_code":              "",
-                    "member_id":             "",
-                    "taxable_amount":        "",
-                    "subj_gross":            "",
-                    "adjusted_gross":        "",
-                    "adjusted_supl_gross":   "",
-                    "gross_earnings_amount": "",
-                    "reference_type":        "",
-                    "reference_id":          "",
-                    "notes":                 _first.get("notes", ""),
-                }
-
-            if _split_mode:
-                # Partition employees so each CSV's total company debit stays under $10,000
-                SPLIT_LIMIT = 10000.0
-                partitions  = []
-                _cur_rows, _cur_sum = [], 0.0
-                for _g in csv_groups:
-                    if _cur_rows and (_cur_sum + _g["debit"]) >= SPLIT_LIMIT:
+                rows.append(out_row)
+    
+                detail.append({
+                    "mid":        mid,
+                    "cid":        _shared_cid,
+                    "gross":      gross,
+                    "result":     result,
+                    "er_rates":   combined_er_rates,
+                    "notes":      _notes_joined,
+                    "adj_date":   _adj_date_str,
+                    "adjustment": _adjustment_info,
+                })
+    
+            if errors:
+                for e in errors:
+                    st.warning(e)
+    
+            st.session_state.lag_results = rows
+            st.session_state.lag_detail  = detail
+    
+        rows = st.session_state.get("lag_results", [])
+        if not rows:
+            st.info("No results to display.")
+        else:
+            results_df = pd.DataFrame(rows)
+    
+            # Summary metrics
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Employees", len(results_df))
+            m2.metric("Total Gross", fmt(results_df["Gross Pay"].sum()))
+            m3.metric("Total Net",   fmt(results_df["Net Pay"].sum()))
+            m4.metric("Total EE Tax", fmt(results_df["Total Employee Tax"].sum()))
+    
+            st.divider()
+    
+            # Display table with currency formatting
+            display_df = results_df.copy()
+            for col in ["Gross Pay", "Net Pay", "YTD Medicare Wages", "SS Employee", "Medicare Employee",
+                        "Add. Medicare Employee", "FUTA", "Additional EE Taxes",
+                        "Total Employee Tax", "Employer Taxes"]:
+                display_df[col] = display_df[col].apply(lambda x: fmt(float(x)))
+    
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+    
+            st.divider()
+    
+            # Per-employee breakdown expanders
+            with st.expander("Per-Employee Breakdown"):
+                for row in rows:
+                    st.markdown(f"**{row['MID']}** ({row['State']}) — Gross: {fmt(row['Gross Pay'])} | Net: {fmt(row['Net Pay'])} | YTD Med: {fmt(row['YTD Medicare Wages'])}")
+                    cols = st.columns(4)
+                    cols[0].metric("SS", fmt(row["SS Employee"]))
+                    cols[1].metric("Medicare", fmt(row["Medicare Employee"]))
+                    cols[2].metric("Add. Medicare", fmt(row["Add. Medicare Employee"]))
+                    cols[3].metric("FUTA", fmt(row["FUTA"]))
+                    st.divider()
+    
+            # CSV Export — per-tax rows in adjustment format (matches Gross Up Calculator)
+            render_section_divider("lag", "CSV EXPORT", "#2563eb")
+    
+            _csv_cols = [
+                "account_type", "entry_type", "adjustment_date", "amount",
+                "cid", "tax_code", "member_id", "taxable_amount", "subj_gross",
+                "adjusted_gross", "adjusted_supl_gross", "gross_earnings_amount",
+                "reference_type", "reference_id", "notes",
+            ]
+    
+            def _fmt_num(v):
+                return round(v, 2) if isinstance(v, (int, float)) else v
+    
+            csv_rows   = []
+            csv_groups = []   # one entry per employee: {"mid", "debit", "rows"} — used for Split CSV
+            for d in st.session_state.get("lag_detail", []):
+                _g        = d["gross"]
+                _res      = d["result"]
+                _er       = d["er_rates"]
+                _mid_out  = d["mid"].lstrip("M").lstrip("m")
+                _cid_out  = d["cid"].lstrip("C").lstrip("c")
+                _notes_out = d["notes"]
+                _date_out  = d["adj_date"]
+    
+                def _mk_row(account_type, entry_type, amount, tax_code, member_id,
+                            taxable, subj_gross, adj_gross, adj_supl, gross_earnings,
+                            ref_type, ref_id,
+                            _date_out=_date_out, _cid_out=_cid_out, _notes_out=_notes_out):
+                    return {
+                        "account_type": account_type, "entry_type": entry_type,
+                        "adjustment_date": _date_out, "amount": _fmt_num(amount),
+                        "cid": _cid_out, "tax_code": tax_code, "member_id": member_id,
+                        "taxable_amount": _fmt_num(taxable), "subj_gross": _fmt_num(subj_gross),
+                        "adjusted_gross": _fmt_num(adj_gross), "adjusted_supl_gross": _fmt_num(adj_supl),
+                        "gross_earnings_amount": _fmt_num(gross_earnings),
+                        "reference_type": ref_type, "reference_id": ref_id, "notes": _notes_out,
+                    }
+    
+                def _cr(tax_code, amount, taxable, gross_earnings=0.0,
+                        _g=_g, _mid_out=_mid_out):
+                    return _mk_row("Clearing", "Credit", amount, tax_code, _mid_out,
+                                   taxable, _g, taxable, 0.0, gross_earnings, "x", 1)
+    
+                _emp_rows = []
+    
+                # Federal Withholding (00-400) — always included
+                _fed_item = next((it for it in _res.get("custom_items", []) if it[0] == "Federal - Employee Withholding"), None)
+                _fed_amt  = 0.0
+                if _fed_item:
+                    _fed_amt = _fed_item[4] if len(_fed_item) >= 6 else _fed_item[3]
+                _emp_rows.append(_cr("00-400", _fed_amt, _g))
+    
+                # SS Employee / Employer (00-403 / 00-404)
+                _emp_rows.append(_cr("00-403", _res.get("ss_amount", 0), _res.get("ss_taxable", 0)))
+                _emp_rows.append(_cr("00-404", _res.get("ss_amount", 0), _res.get("ss_taxable", 0)))
+    
+                # Medicare Employee (00-406)
+                _emp_rows.append(_cr("00-406", _res.get("med_amount", 0), _g))
+    
+                # Additional Medicare (00-901) — only when taxable > 0
+                if _res.get("add_med_taxable", 0) > 0:
+                    _emp_rows.append(_cr("00-901", _res["add_med_amount"], _res["add_med_taxable"]))
+    
+                # Medicare Employer (00-407)
+                _emp_rows.append(_cr("00-407", _res.get("med_amount", 0), _g))
+    
+                # FUTA (00-402) — skipped entirely when the FUTA toggle is No;
+                # otherwise, when fully over wage base, use gross_earnings_amount
+                _include_futa_csv = st.session_state.get("lag_include_futa", "Yes") == "Yes"
+                if _include_futa_csv:
+                    _futa_taxable = _res.get("futa_taxable", 0)
+                    _futa_amount  = _res.get("futa_amount", 0)
+                    if _futa_taxable == 0:
+                        _emp_rows.append(_cr("00-402", _futa_amount, 0, gross_earnings=_g))
+                    else:
+                        _emp_rows.append(_cr("00-402", _futa_amount, _futa_taxable))
+    
+                # Employee custom taxes (excluding Federal Withholding, already emitted)
+                for item in _res.get("custom_items", []):
+                    if item[0] == "Federal - Employee Withholding":
+                        continue
+                    _code    = item[1] if len(item) >= 6 else DESC_TO_CODE.get(item[0], "")
+                    _taxable = item[3] if len(item) >= 6 else item[2]
+                    _amt     = item[4] if len(item) >= 6 else (item[3] if len(item) >= 4 else item[2])
+                    _emp_rows.append(_cr(_code, _amt, _taxable))
+    
+                # Employer custom taxes
+                for _name, _code, _rate, _limit_room, _ytd_display in _er:
+                    _taxable = min(_g, _limit_room) if _limit_room is not None else _g
+                    _amt     = round(_taxable * _rate / 100, 2)
+                    _emp_rows.append(_cr(_code, _amt, _taxable))
+    
+                # Per-employee clearing total — used for partitioning and the final debit roll-up.
+                # The Company/Debit line itself is now a single consolidated row at the end of each CSV.
+                _clearing_total = round(sum(r["amount"] for r in _emp_rows), 2)
+    
+                csv_rows.extend(_emp_rows)
+                csv_groups.append({"mid": d["mid"], "debit": _clearing_total, "rows": list(_emp_rows)})
+    
+            if csv_rows:
+                _split_mode = st.session_state.get("lag_split_csv", "No") == "Yes"
+                _cid_base   = st.session_state.get("lag_cid", "").strip()
+    
+                def _make_debit_row(clearing_rows):
+                    """Single consolidated Company/Debit row summing every Clearing/Credit amount in the CSV."""
+                    _amounts = [r.get("amount", 0) for r in clearing_rows]
+                    _sum     = round(sum(a for a in _amounts if isinstance(a, (int, float))), 2)
+                    _first   = clearing_rows[0] if clearing_rows else {}
+                    return {
+                        "account_type":          "Company",
+                        "entry_type":            "Debit",
+                        "adjustment_date":       _first.get("adjustment_date", ""),
+                        "amount":                _sum,
+                        "cid":                   _first.get("cid", ""),
+                        "tax_code":              "",
+                        "member_id":             "",
+                        "taxable_amount":        "",
+                        "subj_gross":            "",
+                        "adjusted_gross":        "",
+                        "adjusted_supl_gross":   "",
+                        "gross_earnings_amount": "",
+                        "reference_type":        "",
+                        "reference_id":          "",
+                        "notes":                 _first.get("notes", ""),
+                    }
+    
+                if _split_mode:
+                    # Partition employees so each CSV's total company debit stays under $10,000
+                    SPLIT_LIMIT = 10000.0
+                    partitions  = []
+                    _cur_rows, _cur_sum = [], 0.0
+                    for _g in csv_groups:
+                        if _cur_rows and (_cur_sum + _g["debit"]) >= SPLIT_LIMIT:
+                            partitions.append({"rows": _cur_rows, "sum": _cur_sum})
+                            _cur_rows, _cur_sum = [], 0.0
+                        _cur_rows.extend(_g["rows"])
+                        _cur_sum += _g["debit"]
+                    if _cur_rows:
                         partitions.append({"rows": _cur_rows, "sum": _cur_sum})
-                        _cur_rows, _cur_sum = [], 0.0
-                    _cur_rows.extend(_g["rows"])
-                    _cur_sum += _g["debit"]
-                if _cur_rows:
-                    partitions.append({"rows": _cur_rows, "sum": _cur_sum})
-
-                st.caption(
-                    f"Split into **{len(partitions)}** CSV(s), each capped under $10,000 in company debit."
-                )
-
-                for _i, _part in enumerate(partitions, start=1):
-                    _part_rows = _part["rows"] + [_make_debit_row(_part["rows"])]
-
-                    st.markdown(
-                        f"**Part {_i} · Company Debit Total: {fmt(_part['sum'])}**"
+    
+                    st.caption(
+                        f"Split into **{len(partitions)}** CSV(s), each capped under $10,000 in company debit."
                     )
-                    st.dataframe(
-                        pd.DataFrame(_part_rows, columns=_csv_cols),
-                        use_container_width=True, hide_index=True,
-                    )
-
-                    _buf = io.StringIO()
-                    _w   = csv.DictWriter(_buf, fieldnames=_csv_cols)
-                    _w.writeheader()
-                    _w.writerows(_part_rows)
-
+    
+                    for _i, _part in enumerate(partitions, start=1):
+                        _part_rows = _part["rows"] + [_make_debit_row(_part["rows"])]
+    
+                        st.markdown(
+                            f"**Part {_i} · Company Debit Total: {fmt(_part['sum'])}**"
+                        )
+                        st.dataframe(
+                            pd.DataFrame(_part_rows, columns=_csv_cols),
+                            use_container_width=True, hide_index=True,
+                        )
+    
+                        _buf = io.StringIO()
+                        _w   = csv.DictWriter(_buf, fieldnames=_csv_cols)
+                        _w.writeheader()
+                        _w.writerows(_part_rows)
+    
+                        st.download_button(
+                            label=f"Download CSV · Part {_i}",
+                            data=_buf.getvalue(),
+                            file_name=f"{_cid_base} PTU Part {_i}.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key=f"lag_download_csv_part_{_i}",
+                        )
+                else:
+                    csv_rows_with_debit = csv_rows + [_make_debit_row(csv_rows)]
+    
+                    st.dataframe(pd.DataFrame(csv_rows_with_debit, columns=_csv_cols),
+                                 use_container_width=True, hide_index=True)
+    
+                    csv_buf = io.StringIO()
+                    csv_writer = csv.DictWriter(csv_buf, fieldnames=_csv_cols)
+                    csv_writer.writeheader()
+                    csv_writer.writerows(csv_rows_with_debit)
+    
+                    filename = f"{_cid_base} PTU.csv"
                     st.download_button(
-                        label=f"Download CSV · Part {_i}",
-                        data=_buf.getvalue(),
-                        file_name=f"{_cid_base} PTU Part {_i}.csv",
+                        label="Download CSV",
+                        data=csv_buf.getvalue(),
+                        file_name=filename,
                         mime="text/csv",
                         use_container_width=True,
-                        key=f"lag_download_csv_part_{_i}",
+                        key="lag_download_csv",
                     )
-            else:
-                csv_rows_with_debit = csv_rows + [_make_debit_row(csv_rows)]
-
-                st.dataframe(pd.DataFrame(csv_rows_with_debit, columns=_csv_cols),
-                             use_container_width=True, hide_index=True)
-
-                csv_buf = io.StringIO()
-                csv_writer = csv.DictWriter(csv_buf, fieldnames=_csv_cols)
-                csv_writer.writeheader()
-                csv_writer.writerows(csv_rows_with_debit)
-
-                filename = f"{_cid_base} PTU.csv"
-                st.download_button(
-                    label="Download CSV",
-                    data=csv_buf.getvalue(),
-                    file_name=filename,
-                    mime="text/csv",
-                    use_container_width=True,
-                    key="lag_download_csv",
-                )
