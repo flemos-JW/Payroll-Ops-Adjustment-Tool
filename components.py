@@ -157,7 +157,7 @@ def render_breakdown_table(rows: list[tuple[str, str, bool]]):
 # ---------------------------------------------------------------------------
 _COPY_BUTTON_ID = 0
 
-def render_copyable_html(html_content: str, button_label: str = "Copy to Clipboard"):
+def render_copyable_html(html_content: str, button_label: str = "Copy to Clipboard", height: int = 400):
     """
     Render HTML content with a copy button that copies rich HTML to clipboard.
     Jira/Confluence will preserve bold, links, and line breaks on paste.
@@ -166,14 +166,16 @@ def render_copyable_html(html_content: str, button_label: str = "Copy to Clipboa
     _COPY_BUTTON_ID += 1
     container_id = f"copyable-{_COPY_BUTTON_ID}"
 
+    st.markdown(f"""<div id="{container_id}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         font-size: 14px; line-height: 1.8; border: 1px solid #3a4560; border-radius: 8px;
+         padding: 16px; background: #0d1225; color: #e2e8f0; margin-bottom: 12px;">
+        {html_content}
+    </div>""", unsafe_allow_html=True)
+
     import streamlit.components.v1 as stc
     stc.html(f"""
-<div id="{container_id}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-     font-size: 14px; line-height: 1.8; padding: 12px 0;">
-    {html_content}
-</div>
-<button onclick="copyContent_{_COPY_BUTTON_ID}()" style="
-    margin-top: 8px; padding: 6px 14px; font-size: 0.8rem; font-weight: 600;
+<button id="btn-{container_id}" onclick="copyContent_{_COPY_BUTTON_ID}()" style="
+    padding: 8px 18px; font-size: 0.85rem; font-weight: 600;
     background: #f0f2f6; border: 1px solid #d1d5db; border-radius: 6px;
     cursor: pointer; color: #374151; letter-spacing: 0.02em;
     transition: background 0.15s;">
@@ -181,13 +183,14 @@ def render_copyable_html(html_content: str, button_label: str = "Copy to Clipboa
 </button>
 <script>
 function copyContent_{_COPY_BUTTON_ID}() {{
-    const el = document.getElementById("{container_id}");
+    const el = window.parent.document.getElementById("{container_id}");
+    if (!el) return;
     const html = el.innerHTML;
     const blob = new Blob([html], {{type: "text/html"}});
     const plainBlob = new Blob([el.innerText], {{type: "text/plain"}});
     const item = new ClipboardItem({{"text/html": blob, "text/plain": plainBlob}});
     navigator.clipboard.write([item]).then(() => {{
-        const btn = event.target;
+        const btn = document.getElementById("btn-{container_id}");
         btn.textContent = "Copied!";
         btn.style.background = "#d1fae5";
         btn.style.borderColor = "#06ffa5";
@@ -199,7 +202,7 @@ function copyContent_{_COPY_BUTTON_ID}() {{
     }});
 }}
 </script>
-""", height=0, scrolling=False)
+""", height=50, scrolling=False)
 
 
 # ---------------------------------------------------------------------------
@@ -435,19 +438,14 @@ def render_step_progress(prefix: str, steps: list, current: int, accent_color: s
             f'width:{width_pct}%; height:2px; background:{color};"></div>'
         )
 
-    st.markdown(f"""
-<style>
+    st.markdown(f"""<style>
 @keyframes {prefix}pulse {{
     0%, 100% {{ box-shadow: 0 0 8px {_rgba(accent_color, 0.3)}; }}
     50% {{ box-shadow: 0 0 20px {_rgba(accent_color, 0.6)}; }}
 }}
-</style>
-<div style="display:flex; align-items:flex-start; justify-content:space-between; padding:16px 10px 24px 10px;
-    position:relative; margin-bottom:12px;">
-    {line_segments}
-    {circles}
-</div>
-""", unsafe_allow_html=True)
+</style>""", unsafe_allow_html=True)
+
+    st.markdown(f"""<div style="display:flex; align-items:flex-start; justify-content:space-between; padding:16px 10px 24px 10px; position:relative; margin-bottom:12px;">{line_segments}{circles}</div>""", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------

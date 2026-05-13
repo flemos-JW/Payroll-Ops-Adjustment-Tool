@@ -1261,6 +1261,60 @@ with right:
             )
             render_copyable_html(_misc_full_copy_html, "Copy Summary to Clipboard")
 
+        else:
+            render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
+
+            st.caption("Paste the CS Tools link to make the header clickable")
+            st.text_input("CS Tools Link", placeholder="Paste link here...", key="calc_cs_link", label_visibility="visible")
+            _default_debit = st.session_state.adj_date.strftime("%m/%d/%Y") if "adj_date" in st.session_state and st.session_state.adj_date else ""
+            if "calc_debit_date" not in st.session_state or not st.session_state.calc_debit_date:
+                st.session_state.calc_debit_date = _default_debit
+            st.text_input("Debit Date", placeholder="e.g. 01/15/2025", key="calc_debit_date", label_visibility="visible")
+
+            st.divider()
+            _gen_debit_date = st.session_state.get("calc_debit_date", "").strip() or "XXXXX"
+            _gen_cs_url     = st.session_state.get("calc_cs_link", "").strip()
+            _gen_here_link  = (
+                f'<a href="{_gen_cs_url}" target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
+                if _gen_cs_url else 'here'
+            )
+            _gen_bdown_rows = [
+                ("Gross Pay", fmt(_calc_gross), False),
+                ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
+                ("&minus; Medicare", fmt(-_calc_result.get("med_amount", 0)), False),
+            ]
+            if _calc_result.get("add_med_amount", 0) > 0:
+                _gen_bdown_rows.append(("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]), False))
+            for _ci in _calc_result.get("custom_items", []):
+                _ci_name = _ci[0]
+                _ci_amt  = _ci[4] if len(_ci) >= 6 else (_ci[3] if len(_ci) >= 4 else _ci[2])
+                if _ci_amt == 0 or _ci_name == "Federal - Employee Withholding":
+                    continue
+                _gen_bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
+            _gen_bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
+
+            _gen_table_html = (
+                '<table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:8px;">'
+                '<thead><tr style="border-bottom:2px solid #ccc;">'
+                '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
+                '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
+                '</tr></thead><tbody>'
+            )
+            for _lbl, _amt, _bold in _gen_bdown_rows:
+                _a = f"<b>{_amt}</b>" if _bold else _amt
+                _l = f"<b>{_lbl}</b>" if _bold else _lbl
+                _gen_table_html += f'<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:7px 4px;">{_l}</td><td style="text-align:right; padding:7px 8px;">{_a}</td></tr>'
+            _gen_table_html += "</tbody></table>"
+
+            _gen_full_copy_html = (
+                f'<p style="margin:0 0 8px 0; line-height:1.4;">'
+                f'The adjustment has been completed and can be viewed {_gen_here_link}. '
+                f'The employer will be debited ${_clearing_total:,.2f} on {_gen_debit_date}.'
+                f'</p>'
+                f'{_gen_table_html}'
+            )
+            render_copyable_html(_gen_full_copy_html, "Copy Summary to Clipboard")
+
 # -----------------------------------------------------------------------
 # TAB 2 — FICA Refund
 # -----------------------------------------------------------------------

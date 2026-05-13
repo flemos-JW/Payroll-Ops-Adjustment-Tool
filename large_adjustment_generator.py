@@ -303,25 +303,28 @@ def _build_client_report_html(results, detail_list, name_by_mid, cid, adj_date, 
             diff = _safe_float(adj.get("diff", 0))
             diff_abs = fmt(abs(diff))
             diff_prefix = "+" if diff > 0 else "−"
-            applied_desc = _client_friendly_tax_name(adj.get("tax_name", ""))
             state_for_msg = state or "the employee's state"
-            loc = adj.get("location", "")
-            if loc == "state_450":
+            _split_details = adj.get("split", [])
+            if len(_split_details) >= 2:
+                _fed_detail = next((d for d in _split_details if "federal" in d.get("location", "")), {})
+                _st_detail  = next((d for d in _split_details if d.get("location") == "state_450"), {})
                 reason = (
-                    f"Because {_html.escape(state_for_msg)} collects state income tax, "
-                    f"the variance was applied to the state withholding line — that's the most "
-                    f"natural place for it to land."
+                    f"The variance was split <b>70% to Federal Withholding</b> ({fmt(abs(_safe_float(_fed_detail.get('share', 0))))}) "
+                    f"and <b>30% to State Withholding</b> ({fmt(abs(_safe_float(_st_detail.get('share', 0))))})."
                 )
-            elif loc == "federal_00_400":
-                reason = (
-                    f"{_html.escape(state_for_msg)} does not collect state income tax, "
-                    f"so the variance was applied to the Federal Income Tax Withholding line."
-                )
+            elif len(_split_details) == 1:
+                _d = _split_details[0]
+                if "federal" in _d.get("location", ""):
+                    reason = (
+                        f"{_html.escape(state_for_msg)} has no state withholding code, "
+                        f"so 100% of the variance was applied to Federal Withholding."
+                    )
+                else:
+                    reason = (
+                        f"The variance was applied to the state withholding line."
+                    )
             else:
-                reason = (
-                    "A Federal Income Tax Withholding entry was added to the employee's records "
-                    "to absorb this variance."
-                )
+                reason = ""
             adjustment_html = f"""
             <div class="adjustment">
               <div class="adjustment-title">Withholding Adjustment Applied</div>
@@ -329,11 +332,6 @@ def _build_client_report_html(results, detail_list, name_by_mid, cid, adj_date, 
                 The calculated total withholding of <b>{fmt(_safe_float(adj.get('calculated_total', 0)))}</b>
                 differed from the amount actually withheld (<b>{fmt(_safe_float(adj.get('target_withheld', 0)))}</b>)
                 by <b style="color:{'#047857' if diff > 0 else '#be123c'};">{diff_prefix}{diff_abs}</b>.
-                To reconcile, this variance was applied to
-                <b>{_html.escape(applied_desc)}</b>, adjusting it from
-                <span style="font-variant-numeric:tabular-nums;">{fmt(_safe_float(adj.get('prev_amount', 0)))}</span>
-                to
-                <b style="font-variant-numeric:tabular-nums;">{fmt(_safe_float(adj.get('new_amount', 0)))}</b>.
                 {reason}
               </div>
             </div>
@@ -758,6 +756,68 @@ HARDCODED_RATES = {
     "California - Employee Disability": {2024: 1.1, 2025: 1.2, 2026: 1.3},
 }
 
+# State supplemental withholding rates (%) — applied to -450 codes when "Supplemental Rates" enabled
+# States with no income tax (AK, FL, NV, NH, SD, TN, TX, WY) excluded.
+# Vermont: 30% of federal supplemental (22%) = 6.6% of gross
+# Wisconsin: graduated brackets (see WISCONSIN_SUPPLEMENTAL_BRACKETS)
+STATE_SUPPLEMENTAL_RATES = {
+    "Alabama":              {2025: 5.0,    2026: 5.0},
+    "Arizona":              {2025: 2.5,    2026: 2.5},
+    "Arkansas":             {2025: 3.9,    2026: 3.9},
+    "California":           {2025: 6.6,    2026: 6.6},
+    "Colorado":             {2025: 4.4,    2026: 4.4},
+    "Connecticut":          {2025: 6.99,   2026: 6.99},
+    "Delaware":             {2025: 5.0,    2026: 5.0},
+    "District of Columbia": {2025: 10.75,  2026: 10.75},
+    "Georgia":              {2025: 5.39,   2026: 5.19},
+    "Hawaii":               {2025: 7.9,    2026: 7.9},
+    "Idaho":                {2025: 5.695,  2026: 5.3},
+    "Illinois":             {2025: 4.95,   2026: 4.95},
+    "Indiana":              {2025: 3.0,    2026: 2.95},
+    "Iowa":                 {2025: 3.8,    2026: 3.8},
+    "Kansas":               {2025: 5.0,    2026: 5.0},
+    "Kentucky":             {2025: 4.0,    2026: 3.5},
+    "Louisiana":            {2025: 3.09,   2026: 3.09},
+    "Maine":                {2025: 5.0,    2026: 5.0},
+    "Maryland":             {2025: 0.0,    2026: 6.5},
+    "Massachusetts":        {2025: 5.0,    2026: 5.0},
+    "Michigan":             {2025: 4.25,   2026: 4.25},
+    "Minnesota":            {2025: 6.25,   2026: 6.25},
+    "Mississippi":          {2025: 4.4,    2026: 4.0},
+    "Missouri":             {2025: 4.7,    2026: 4.7},
+    "Montana":              {2025: 5.0,    2026: 5.0},
+    "Nebraska":             {2025: 5.0,    2026: 3.5},
+    "New Jersey":           {2025: 11.8,   2026: 11.8},
+    "New Mexico":           {2025: 5.9,    2026: 5.9},
+    "New York":             {2025: 11.7,   2026: 11.7},
+    "North Carolina":       {2025: 4.35,   2026: 4.09},
+    "North Dakota":         {2025: 1.5,    2026: 1.5},
+    "Ohio":                 {2025: 3.5,    2026: 2.75},
+    "Oklahoma":             {2025: 4.75,   2026: 4.5},
+    "Oregon":               {2025: 8.0,    2026: 8.0},
+    "Pennsylvania":         {2025: 3.07,   2026: 3.07},
+    "Rhode Island":         {2025: 5.99,   2026: 5.99},
+    "South Carolina":       {2025: 6.2,    2026: 6.0},
+    "Utah":                 {2025: 4.55,   2026: 4.5},
+    "Vermont":              {2025: 6.6,    2026: 6.6},
+    "Virginia":             {2025: 5.75,   2026: 5.75},
+    "West Virginia":        {2025: 4.82,   2026: 4.82},
+    "Wisconsin":            {2025: None,   2026: None},
+}
+
+# Wisconsin: graduated supplemental brackets based on gross amount
+WISCONSIN_SUPPLEMENTAL_BRACKETS = [
+    (12_760.00, 3.54),
+    (25_520.00, 4.65),
+    (280_950.00, 5.30),
+    (float("inf"), 7.65),
+]
+
+# States requiring user verification of supplemental rate (by year)
+SUPPLEMENTAL_RATE_WARNINGS = {
+    "Maryland": {2025: "Maryland has no standard supplemental rate for 2025. Verify the correct rate and enter it manually."},
+}
+
 TAX_DESCRIPTIONS = sorted(DESC_TO_CODE.keys())
 
 _EXCLUDED_DESCRIPTIONS = {
@@ -1006,8 +1066,8 @@ with tab_settings:
         include_er_taxes = st.selectbox("Employer Taxes", ["Yes", "No"], key="lag_include_er_taxes")
 
     with supfit_col:
-        supplemental_fit = st.selectbox("Supplemental FIT", ["No", "Yes"], key="lag_supplemental_fit")
-        st.caption("Applies 22% Federal Withholding")
+        supplemental_fit = st.selectbox("Supplemental Rates", ["No", "Yes"], key="lag_supplemental_fit")
+        st.caption("Applies supplemental FIT + state rates")
 
     with split_col:
         split_csv = st.selectbox("Split CSV", ["No", "Yes"], key="lag_split_csv")
@@ -1097,9 +1157,26 @@ with tab_settings:
                     {"name": d, "rate": HARDCODED_RATES.get(d, {}).get(year, 0.0), "limit": "No"}
                     for d in _state_ee_descs
                 ]
-                # Supplemental FIT — 22% Federal Withholding applied to every employee when enabled
+                # Supplemental Rates — 22% Federal Withholding + state supplemental rate on -450 codes
                 if _supplemental_fit:
                     _new_ee.append({"name": "Federal - Employee Withholding", "rate": 22.0, "limit": "No"})
+                    _supl_year_rates = STATE_SUPPLEMENTAL_RATES.get(_emp_state, {})
+                    _supl_rate = _supl_year_rates.get(year, _supl_year_rates.get(2026, _supl_year_rates.get(2025)))
+                    if _supl_rate is None and _emp_state == "Wisconsin":
+                        # Wisconsin graduated brackets — resolve from employee gross
+                        _emp_row_wi = _emp_preview[_emp_preview["mid"] == _mid]
+                        _emp_gross_wi = float(_emp_row_wi.iloc[0]["pay_amount"]) if not _emp_row_wi.empty else 0.0
+                        _supl_rate = 3.54
+                        for _bracket_limit, _bracket_rate in WISCONSIN_SUPPLEMENTAL_BRACKETS:
+                            if _emp_gross_wi <= _bracket_limit:
+                                _supl_rate = _bracket_rate
+                                break
+                    if _supl_rate:
+                        for _te in _new_ee:
+                            _te_code = DESC_TO_CODE.get(_te.get("name", ""), _te.get("custom_code", ""))
+                            if _te_code.endswith("-450"):
+                                _te["rate"] = _supl_rate
+                                break
                 # Append CSV-uploaded additional taxes as write-in entries
                 for _e in _addl_list:
                     _new_ee.append({
@@ -1148,6 +1225,15 @@ with tab_settings:
             if _emp_state:
                 _label += f" — {_emp_state}"
             with st.expander(_label):
+                # Supplemental rate warnings for specific states
+                if _supplemental_fit and _emp_state in SUPPLEMENTAL_RATE_WARNINGS:
+                    _warn_msg = SUPPLEMENTAL_RATE_WARNINGS[_emp_state].get(year)
+                    if _warn_msg:
+                        st.warning(_warn_msg)
+                if _supplemental_fit and _emp_state == "California":
+                    st.info("CA supplemental: 6.6% (default). Use 10.23% for stock options/bonuses if applicable.")
+                if _supplemental_fit and _emp_state == "Wisconsin":
+                    st.info("WI supplemental: graduated rate applied based on employee gross amount.")
                 # Summary metrics for this employee
                 _ytd_lookup   = st.session_state.get("lag_ytd_lookup", {})
                 _ytd_med_disp = _ytd_lookup.get(_mid, None)
@@ -1301,9 +1387,9 @@ with tab_custom:
     render_section_divider("lag", "ACTUAL TAX WITHHELD", "#ff006e")
     st.caption(
         "Paste a table with columns **MID**, **Tax Withheld**. During calculation, the difference "
-        "between the employee's calculated total tax and the actual withheld amount is applied to the "
-        "employee's state withholding (tax code ending in **-450**). If the employee's state has no "
-        "withholding code, the difference is applied to Federal Withholding (**00-400**)."
+        "between the employee's calculated total tax and the actual withheld amount is split "
+        "**70% to Federal Withholding (00-400)** and **30% to State Withholding (-450)**. "
+        "If the employee has no state withholding code, 100% goes to Federal."
     )
 
     _custom_key = f"lag_custom_data_{st.session_state._clear_count}"
@@ -1537,7 +1623,7 @@ with tab_viz:
                     if _loc == "state_450":
                         _reason = f"The <b>{_emp_st}</b> state withholding line (<code style='color:#c5d1e0'>{_adj['tax_code']}</code>) was the closest match, so the variance was absorbed there."
                     elif _loc == "federal_00_400":
-                        _reason = f"<b>{_emp_st}</b> has no state withholding tax code, so the variance was routed to the Federal Withholding line (<code style='color:#c5d1e0'>00-400</code>) that Supplemental FIT added."
+                        _reason = f"<b>{_emp_st}</b> has no state withholding tax code, so the variance was routed to the Federal Withholding line (<code style='color:#c5d1e0'>00-400</code>) that Supplemental Rates added."
                     else:
                         _reason = "No existing withholding line was present, so a new Federal Withholding entry (<code style='color:#c5d1e0'>00-400</code>) was created to absorb the variance."
                     st.markdown(f"""
@@ -2112,7 +2198,7 @@ with tab_results:
                     result["futa_amount"]  = 0.0
                     result["futa_taxable"] = 0.0
     
-                # Custom Data override — adjust state -450 (or 00-400) to match actual withheld total
+                # Custom Data override — 70/30 split: 70% to Federal (00-400), 30% to State (-450)
                 _target_withheld = _tax_withheld_by_mid.get(mid)
                 _adjustment_info = None
                 if _target_withheld is not None:
@@ -2120,45 +2206,59 @@ with tab_results:
                     _diff        = round(float(_target_withheld) - _calc_before, 2)
                     if _diff != 0:
                         _new_items = list(result["custom_items"])
-                        _applied   = None
-                        # Prefer state withholding (any code ending in -450)
+                        _fed_share   = round(_diff * 0.70, 2)
+                        _state_share = round(_diff - _fed_share, 2)
+
+                        # Find state -450 index and federal 00-400 index
+                        _state_idx = None
+                        _fed_idx   = None
                         for _i, _it in enumerate(_new_items):
                             _nm, _cd, _rt, _tx, _am, _ytd = _it
-                            if _cd and _cd.endswith("-450"):
-                                _new_amt = round(_am + _diff, 2)
-                                _new_items[_i] = (_nm, _cd, _rt, _tx, _new_amt, _ytd)
-                                _applied = {"location": "state_450", "tax_name": _nm, "tax_code": _cd,
-                                            "prev_amount": float(_am), "new_amount": _new_amt}
-                                break
-                        # Fall back to Federal Withholding (00-400)
-                        if _applied is None:
-                            for _i, _it in enumerate(_new_items):
-                                _nm, _cd, _rt, _tx, _am, _ytd = _it
-                                if _cd == "00-400":
-                                    _new_amt = round(_am + _diff, 2)
-                                    _new_items[_i] = (_nm, _cd, _rt, _tx, _new_amt, _ytd)
-                                    _applied = {"location": "federal_00_400", "tax_name": _nm, "tax_code": _cd,
-                                                "prev_amount": float(_am), "new_amount": _new_amt}
-                                    break
-                        # Create a Federal Withholding line if neither exists yet
-                        if _applied is None:
+                            if _cd and _cd.endswith("-450") and _state_idx is None:
+                                _state_idx = _i
+                            if _cd == "00-400" and _fed_idx is None:
+                                _fed_idx = _i
+
+                        _applied_details = []
+
+                        # Apply 30% to state -450 (if exists)
+                        if _state_idx is not None and _state_share != 0:
+                            _nm, _cd, _rt, _tx, _am, _ytd = _new_items[_state_idx]
+                            _new_amt = round(_am + _state_share, 2)
+                            _new_items[_state_idx] = (_nm, _cd, _rt, _tx, _new_amt, _ytd)
+                            _applied_details.append({"location": "state_450", "tax_name": _nm, "tax_code": _cd,
+                                                     "prev_amount": float(_am), "new_amount": _new_amt, "share": _state_share})
+                        elif _state_idx is None:
+                            _fed_share = _diff
+
+                        # Apply 70% (or full diff if no state) to federal 00-400
+                        if _fed_idx is not None:
+                            _nm, _cd, _rt, _tx, _am, _ytd = _new_items[_fed_idx]
+                            _new_amt = round(_am + _fed_share, 2)
+                            _new_items[_fed_idx] = (_nm, _cd, _rt, _tx, _new_amt, _ytd)
+                            _applied_details.append({"location": "federal_00_400", "tax_name": _nm, "tax_code": _cd,
+                                                     "prev_amount": float(_am), "new_amount": _new_amt, "share": _fed_share})
+                        else:
                             _new_items.append(
-                                ("Federal - Employee Withholding", "00-400", 0.0, gross, round(_diff, 2), None)
+                                ("Federal - Employee Withholding", "00-400", 0.0, gross, round(_fed_share, 2), None)
                             )
-                            _applied = {"location": "new_federal_00_400", "tax_name": "Federal - Employee Withholding",
-                                        "tax_code": "00-400", "prev_amount": 0.0, "new_amount": round(_diff, 2)}
+                            _applied_details.append({"location": "new_federal_00_400", "tax_name": "Federal - Employee Withholding",
+                                                     "tax_code": "00-400", "prev_amount": 0.0, "new_amount": round(_fed_share, 2), "share": _fed_share})
+
                         result["custom_items"] = _new_items
                         result["total_tax"] = round(
                             result["ss_amount"] + result["med_amount"] + result["add_med_amount"]
                             + sum(_it[4] for _it in _new_items), 2
                         )
                         result["net"] = round(gross - result["total_tax"], 2)
+                        _primary = _applied_details[0] if _applied_details else {}
                         _adjustment_info = {
                             "applied":          True,
                             "calculated_total": _calc_before,
                             "target_withheld":  float(_target_withheld),
                             "diff":             _diff,
-                            **_applied,
+                            "split":            _applied_details,
+                            **_primary,
                         }
                     else:
                         _adjustment_info = {
