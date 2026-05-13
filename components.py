@@ -161,29 +161,29 @@ def render_copyable_html(html_content: str, button_label: str = "Copy to Clipboa
     """
     Render HTML content with a copy button that copies rich HTML to clipboard.
     Jira/Confluence will preserve bold, links, and line breaks on paste.
+    Uses a single stc.html iframe for Cloud compatibility.
     """
     global _COPY_BUTTON_ID
     _COPY_BUTTON_ID += 1
     container_id = f"copyable-{_COPY_BUTTON_ID}"
 
-    st.markdown(f"""<div id="{container_id}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-         font-size: 14px; line-height: 1.8; border: 1px solid #3a4560; border-radius: 8px;
-         padding: 16px; background: #0d1225; color: #e2e8f0; margin-bottom: 12px;">
-        {html_content}
-    </div>""", unsafe_allow_html=True)
-
     import streamlit.components.v1 as stc
     stc.html(f"""
+<div id="{container_id}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+     font-size: 14px; line-height: 1.8; border: 1px solid #3a4560; border-radius: 8px;
+     padding: 16px; background: #0d1225; color: #e2e8f0; margin-bottom: 12px;">
+    {html_content}
+</div>
 <button id="btn-{container_id}" onclick="copyContent_{_COPY_BUTTON_ID}()" style="
     padding: 8px 18px; font-size: 0.85rem; font-weight: 600;
     background: #f0f2f6; border: 1px solid #d1d5db; border-radius: 6px;
     cursor: pointer; color: #374151; letter-spacing: 0.02em;
-    transition: background 0.15s;">
+    transition: background 0.15s; margin-top: 8px;">
     {button_label}
 </button>
 <script>
 function copyContent_{_COPY_BUTTON_ID}() {{
-    const el = window.parent.document.getElementById("{container_id}");
+    const el = document.getElementById("{container_id}");
     if (!el) return;
     const html = el.innerHTML;
     const blob = new Blob([html], {{type: "text/html"}});
@@ -202,7 +202,7 @@ function copyContent_{_COPY_BUTTON_ID}() {{
     }});
 }}
 </script>
-""", height=50, scrolling=False)
+""", height=height, scrolling=False)
 
 
 # ---------------------------------------------------------------------------
