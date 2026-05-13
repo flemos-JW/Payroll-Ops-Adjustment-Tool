@@ -1,5 +1,7 @@
 import io
 import csv
+import base64
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 from components import (
@@ -1042,6 +1044,30 @@ def _tax_rows(taxes, key_prefix, descriptions, allow_no_limit_flag=False, state_
                     **_tlimit_kwargs,
                 )
                 taxes[i]["limit_amount"] = limit_amount
+
+# ---------------------------------------------------------------------------
+# PDF Guide link
+# ---------------------------------------------------------------------------
+_guide_path = Path(__file__).parent / "LAG_User_Guide.pdf"
+if _guide_path.exists():
+    with open(_guide_path, "rb") as _f:
+        _pdf_b64 = base64.b64encode(_f.read()).decode()
+    import streamlit.components.v1 as _stc
+    _stc.html(f"""
+    <a href="#" id="pdf_link" style="color:#00e5ff; font-size:0.85rem; text-decoration:none; font-weight:600;">
+    📖 Open User Guide (PDF)</a>
+    <script>
+    document.getElementById('pdf_link').addEventListener('click', function(e) {{
+        e.preventDefault();
+        var b64 = "{_pdf_b64}";
+        var bin = atob(b64);
+        var arr = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        var blob = new Blob([arr], {{type: 'application/pdf'}});
+        window.open(URL.createObjectURL(blob), '_blank');
+    }});
+    </script>
+    """, height=30)
 
 # ---------------------------------------------------------------------------
 # Layout: tabs — Settings | Employee Data | Data Dump

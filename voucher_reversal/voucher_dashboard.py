@@ -6,6 +6,7 @@ copy the terminal command, run it. Mirror of the W-2C Automator dashboard.
 Launch:
     python3 -m streamlit run /Users/franciscolemos/apps/voucher_reversal/voucher_dashboard.py
 """
+import base64
 import io
 import os
 import re
@@ -44,6 +45,19 @@ def _clear_data():
 render_app_sidebar("Voucher Reversal", "v1.2", "#ffbe0b",
                    quick_actions=[{"label": "Clear Session", "callback": _clear_data, "key": "vr_clear"}])
 
+with st.sidebar:
+    if st.button("Install Dependencies", key="vr_install", use_container_width=True):
+        with st.spinner("Installing..."):
+            _r = subprocess.run(
+                "pip install playwright streamlit pandas && python -m playwright install chromium",
+                shell=True, capture_output=True, text=True,
+            )
+        if _r.returncode == 0:
+            st.success("Dependencies installed!")
+        else:
+            st.error(f"Install failed:\n{_r.stderr[-300:]}")
+    st.caption("Run once on first setup")
+
 # ---------------------------------------------------------------------------
 # Header + shared styles
 # ---------------------------------------------------------------------------
@@ -51,6 +65,27 @@ inject_global_css("vr", accent_color="#ffbe0b")
 render_header("vr", "VOUCHER REVERSAL AUTOMATOR",
               "PASTE TABLE · SAVE · RUN AUTOMATION",
               accent_color="#ffbe0b", secondary_color="#ff006e", icon="\U0001f504")
+
+_guide_path = Path(__file__).resolve().parent.parent / "Voucher_Reversal_Guide.pdf"
+if _guide_path.exists():
+    import streamlit.components.v1 as _stc
+    with open(_guide_path, "rb") as _f:
+        _pdf_b64 = base64.b64encode(_f.read()).decode()
+    _stc.html(f"""
+    <a href="#" id="pdf_vr" style="color:#ffbe0b; font-size:0.85rem; text-decoration:none; font-weight:600;">
+    📖 Open User Guide (PDF)</a>
+    <script>
+    document.getElementById('pdf_vr').addEventListener('click', function(e) {{
+        e.preventDefault();
+        var b64 = "{_pdf_b64}";
+        var bin = atob(b64);
+        var arr = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        var blob = new Blob([arr], {{type: 'application/pdf'}});
+        window.open(URL.createObjectURL(blob), '_blank');
+    }});
+    </script>
+    """, height=30)
 
 # ---------------------------------------------------------------------------
 # Step Progress

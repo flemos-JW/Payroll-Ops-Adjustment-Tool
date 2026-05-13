@@ -1,4 +1,6 @@
 import io
+import base64
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 from components import (
@@ -6,6 +8,29 @@ from components import (
     render_auth_screen, render_app_sidebar, render_header, render_section_divider,
     render_metric_row, inject_global_css, page_config, inject_tab_dots_css,
 )
+
+def _pdf_link(filename, color="#00e5ff"):
+    import streamlit.components.v1 as _stc
+    _path = Path(__file__).parent / filename
+    if not _path.exists():
+        return
+    with open(_path, "rb") as _f:
+        _b64 = base64.b64encode(_f.read()).decode()
+    _stc.html(f"""
+    <a href="#" id="pdf_{filename}" style="color:{color}; font-size:0.85rem; text-decoration:none; font-weight:600;">
+    📖 Open User Guide (PDF)</a>
+    <script>
+    document.getElementById('pdf_{filename}').addEventListener('click', function(e) {{
+        e.preventDefault();
+        var b64 = "{_b64}";
+        var bin = atob(b64);
+        var arr = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        var blob = new Blob([arr], {{type: 'application/pdf'}});
+        window.open(URL.createObjectURL(blob), '_blank');
+    }});
+    </script>
+    """, height=30)
 
 # ---------------------------------------------------------------------------
 # Password gate
@@ -592,6 +617,7 @@ tab_calc, tab_fica, tab_ficad = st.tabs(["Calculator", "FICA Refund", "FICA Debi
 # TAB 1 — Calculator
 # -----------------------------------------------------------------------
 with tab_calc:
+  _pdf_link("POA_Calculator_Guide.pdf")
   # Initialize state early so SUI display works on first load
   if "state" not in st.session_state:
       st.session_state.state = ""
@@ -1319,6 +1345,7 @@ with right:
 # TAB 2 — FICA Refund
 # -----------------------------------------------------------------------
 with tab_fica:
+    _pdf_link("POA_FICA_Refund_Guide.pdf")
     import io as _io
     import csv as _csv
     from datetime import date as _date, timedelta as _timedelta
@@ -1586,6 +1613,7 @@ with tab_fica:
 # TAB 3 — FICA Debit
 # -----------------------------------------------------------------------
 with tab_ficad:
+    _pdf_link("POA_FICA_Debit_Guide.pdf")
     # Year selector
     if "ficad_selected_year" not in st.session_state:
         st.session_state.ficad_selected_year = 2026
