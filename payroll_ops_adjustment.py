@@ -100,6 +100,22 @@ SUI_WAGE_BASES = {
 def get_sui_wage_base(state, year):
     return SUI_WAGE_BASES.get(state, {}).get(year)
 
+STATE_ABBREV = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "DC": "District of Columbia", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii",
+    "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa",
+    "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine",
+    "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota",
+    "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska",
+    "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico",
+    "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio",
+    "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island",
+    "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas",
+    "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington",
+    "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
+}
+
 # ---------------------------------------------------------------------------
 # Tax constants
 # ---------------------------------------------------------------------------
@@ -626,6 +642,8 @@ with tab_calc:
 # -----------------------------------------------------------------------
 # LEFT — Inputs
 # -----------------------------------------------------------------------
+_MULTI_CALC_CLICKED = False
+
 with left:
     # ---- Year & YTD ----
     render_section_divider("poa", "TAX YEAR & YTD WAGES", "#00e5ff")
@@ -650,696 +668,999 @@ with left:
     ss_wage_base = SS_WAGE_BASES[year]
     st.caption(f"Social Security wage base for {year}: **${ss_wage_base:,}**")
 
-    ytd_med = st.number_input("YTD Medicare Wages ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f", key=f"ytd_med_input_{st.session_state._clear_count}")
-    ytd_ss  = ytd_med
+    if "multi_emp" not in st.session_state:
+        st.session_state.multi_emp = "No"
+    st.radio("Multiple Employees", ["No", "Yes"], key="multi_emp", horizontal=True)
+    _multi_mode = st.session_state.multi_emp == "Yes"
 
-    render_section_divider("poa", "CALCULATION", "#06ffa5")
-    mode = st.radio("Mode", ["Net Pay (enter gross)", "Gross Up (enter desired net)"], horizontal=True)
+    if not _multi_mode:
+        ytd_med = st.number_input("YTD Medicare Wages ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f", key=f"ytd_med_input_{st.session_state._clear_count}")
+        ytd_ss  = ytd_med
 
-    if "pay_amount" not in st.session_state:
-        st.session_state.pay_amount = 0.0
+        render_section_divider("poa", "CALCULATION", "#06ffa5")
+        mode = st.radio("Mode", ["Net Pay (enter gross)", "Gross Up (enter desired net)"], horizontal=True)
 
-    if mode.startswith("Net"):
-        gross_input = st.number_input("Gross Pay ($)", min_value=0.0, value=st.session_state.pay_amount, step=50.0, format="%.2f")
-        st.session_state.pay_amount = gross_input
-        run_label   = "Calculate Net"
-    else:
-        desired_net = st.number_input("Desired Net Pay ($)", min_value=0.0, value=st.session_state.pay_amount, step=50.0, format="%.2f")
-        st.session_state.pay_amount = desired_net
-        run_label   = "Calculate Gross"
+        if "pay_amount" not in st.session_state:
+            st.session_state.pay_amount = 0.0
 
-    calculate = st.button(run_label, type="primary", use_container_width=True)
+        if mode.startswith("Net"):
+            gross_input = st.number_input("Gross Pay ($)", min_value=0.0, value=st.session_state.pay_amount, step=50.0, format="%.2f")
+            st.session_state.pay_amount = gross_input
+            run_label   = "Calculate Net"
+        else:
+            desired_net = st.number_input("Desired Net Pay ($)", min_value=0.0, value=st.session_state.pay_amount, step=50.0, format="%.2f")
+            st.session_state.pay_amount = desired_net
+            run_label   = "Calculate Gross"
 
-    st.divider()
+        calculate = st.button(run_label, type="primary", use_container_width=True)
 
-    _WRITEIN = "— Write in custom —"
+        st.divider()
 
-    def _remove_tax(state_key, idx):
-        prefix = "ee" if state_key == "employee_taxes" else "er"
-        taxes  = st.session_state[state_key]
-        taxes.pop(idx)
-        # Wipe all widget keys for this list so stale cached values don't bleed
-        # into the wrong row positions after the re-render
-        for j in range(len(taxes) + 5):
-            for sfx in ("tname", "trate", "tlimit", "tytd", "tlimit_amt", "custom_name", "custom_code"):
-                st.session_state.pop(f"{prefix}_{sfx}_{j}", None)
-        # Re-seed widget state from the now-correct data list
-        for j, tax in enumerate(taxes):
-            st.session_state[f"{prefix}_tname_{j}"]  = "— Write in custom —" if tax.get("custom_entry") else tax.get("name", "")
-            st.session_state[f"{prefix}_trate_{j}"]  = float(tax.get("rate", 0.0))
-            st.session_state[f"{prefix}_tlimit_{j}"] = tax.get("limit", "No")
-            if tax.get("custom_entry"):
-                st.session_state[f"{prefix}_custom_name_{j}"] = tax.get("custom_name", "")
-                st.session_state[f"{prefix}_custom_code_{j}"] = tax.get("custom_code", "")
-            if tax.get("limit") == "Yes":
-                st.session_state[f"{prefix}_tytd_{j}"]       = float(tax.get("ytd_limit", 0.0))
-                st.session_state[f"{prefix}_tlimit_amt_{j}"] = float(tax.get("limit_amount", 0.0))
+        _WRITEIN = "— Write in custom —"
 
-    def _tax_rows(taxes, key_prefix, descriptions, allow_no_limit_flag=False, state_key=None):
-        """Render a tax rate table section."""
-        for i, tax in enumerate(taxes):
-            _is_custom = tax.get("custom_entry", False)
-            _dd_opts   = ["", _WRITEIN] + descriptions
-            _dd_val    = _WRITEIN if _is_custom else tax.get("name", "")
-            _dd_idx    = _dd_opts.index(_dd_val) if _dd_val in _dd_opts else 0
-            _tname_key = f"{key_prefix}_tname_{i}"
+        def _remove_tax(state_key, idx):
+            prefix = "ee" if state_key == "employee_taxes" else "er"
+            taxes  = st.session_state[state_key]
+            taxes.pop(idx)
+            # Wipe all widget keys for this list so stale cached values don't bleed
+            # into the wrong row positions after the re-render
+            for j in range(len(taxes) + 5):
+                for sfx in ("tname", "trate", "tlimit", "tytd", "tlimit_amt", "custom_name", "custom_code"):
+                    st.session_state.pop(f"{prefix}_{sfx}_{j}", None)
+            # Re-seed widget state from the now-correct data list
+            for j, tax in enumerate(taxes):
+                st.session_state[f"{prefix}_tname_{j}"]  = "— Write in custom —" if tax.get("custom_entry") else tax.get("name", "")
+                st.session_state[f"{prefix}_trate_{j}"]  = float(tax.get("rate", 0.0))
+                st.session_state[f"{prefix}_tlimit_{j}"] = tax.get("limit", "No")
+                if tax.get("custom_entry"):
+                    st.session_state[f"{prefix}_custom_name_{j}"] = tax.get("custom_name", "")
+                    st.session_state[f"{prefix}_custom_code_{j}"] = tax.get("custom_code", "")
+                if tax.get("limit") == "Yes":
+                    st.session_state[f"{prefix}_tytd_{j}"]       = float(tax.get("ytd_limit", 0.0))
+                    st.session_state[f"{prefix}_tlimit_amt_{j}"] = float(tax.get("limit_amount", 0.0))
 
-            # When write-in is active, split c1 into dropdown + text input side by side
-            _is_writein = st.session_state.get(_tname_key, _dd_val) == _WRITEIN
-            if _is_writein:
-                c1a, c1b, c2, c3, c4, c5 = st.columns([1.5, 1.5, 1.2, 1.2, 0.9, 0.4])
-            else:
-                c1, c2, c3, c4, c5 = st.columns([3, 1.2, 1.2, 0.9, 0.4])
-                c1a = c1
+        def _tax_rows(taxes, key_prefix, descriptions, allow_no_limit_flag=False, state_key=None):
+            """Render a tax rate table section."""
+            for i, tax in enumerate(taxes):
+                _is_custom = tax.get("custom_entry", False)
+                _dd_opts   = ["", _WRITEIN] + descriptions
+                _dd_val    = _WRITEIN if _is_custom else tax.get("name", "")
+                _dd_idx    = _dd_opts.index(_dd_val) if _dd_val in _dd_opts else 0
+                _tname_key = f"{key_prefix}_tname_{i}"
 
-            with c1a:
-                _tname_kwargs = {"index": _dd_idx} if _tname_key not in st.session_state else {}
-                sel = st.selectbox(
-                    "Tax Name",
-                    options=_dd_opts,
-                    key=_tname_key,
-                    label_visibility="collapsed",
-                    **_tname_kwargs,
-                )
-
-            if sel == _WRITEIN:
-                taxes[i]["custom_entry"] = True
-                with c1b:
-                    custom_name = st.text_input(
-                        "Custom name",
-                        value=tax.get("custom_name", ""),
-                        key=f"{key_prefix}_custom_name_{i}",
-                        label_visibility="collapsed",
-                        placeholder="Enter tax name...",
-                    )
-                taxes[i]["custom_name"] = custom_name
-                taxes[i]["name"]        = custom_name
-            else:
-                taxes[i]["custom_entry"] = False
-                taxes[i]["name"]         = sel
-                taxes[i].pop("custom_name", None)
-
-            with c2:
-                if taxes[i].get("custom_entry", False):
-                    # Clear stale code if user just switched to write-in from a real tax
-                    if not _is_custom:
-                        taxes[i]["custom_code"] = ""
-                        st.session_state.pop(f"{key_prefix}_custom_code_{i}", None)
-                    custom_code = st.text_input(
-                        "Tax code",
-                        value=taxes[i].get("custom_code", ""),
-                        key=f"{key_prefix}_custom_code_{i}",
-                        label_visibility="collapsed",
-                        placeholder="Code",
-                    )
-                    taxes[i]["custom_code"] = custom_code
-                    code = custom_code
+                # When write-in is active, split c1 into dropdown + text input side by side
+                _is_writein = st.session_state.get(_tname_key, _dd_val) == _WRITEIN
+                if _is_writein:
+                    c1a, c1b, c2, c3, c4, c5 = st.columns([1.5, 1.5, 1.2, 1.2, 0.9, 0.4])
                 else:
-                    code = DESC_TO_CODE.get(sel, "")
-                    taxes[i]["custom_code"] = code
-                    st.markdown(f'<div style="padding:8px 4px; font-size:1rem; font-weight:600; color:inherit;">{code or "—"}</div>', unsafe_allow_html=True)
+                    c1, c2, c3, c4, c5 = st.columns([3, 1.2, 1.2, 0.9, 0.4])
+                    c1a = c1
 
-            with c3:
-                _trate_key = f"{key_prefix}_trate_{i}"
-                _trate_kwargs = {"value": float(tax["rate"])} if _trate_key not in st.session_state else {}
-                rate = st.number_input(
-                    "Rate",
-                    min_value=0.0, max_value=100.0,
-                    step=0.0001, format="%.4f",
-                    key=_trate_key,
-                    label_visibility="collapsed",
-                    **_trate_kwargs,
-                )
-                taxes[i]["rate"] = rate
-
-            with c4:
-                _no_limit = allow_no_limit_flag and (sel == "Federal - Employee Withholding")
-                if _no_limit:
-                    st.session_state[f"{key_prefix}_tlimit_{i}"] = "No"
-                limit = st.selectbox(
-                    "Limit",
-                    options=["No", "Yes"],
-                    key=f"{key_prefix}_tlimit_{i}",
-                    label_visibility="collapsed",
-                    disabled=_no_limit,
-                )
-                taxes[i]["limit"] = limit
-
-            with c5:
-                st.button("✕", key=f"{key_prefix}_tremove_{i}",
-                          on_click=_remove_tax, args=(state_key, i))
-
-            if limit == "Yes":
-                l1, l2 = st.columns([1, 1])
-                _tytd_key     = f"{key_prefix}_tytd_{i}"
-                _tlimit_key   = f"{key_prefix}_tlimit_amt_{i}"
-                with l1:
-                    _tytd_kwargs = {"value": float(tax.get("ytd_limit", 0.0))} if _tytd_key not in st.session_state else {}
-                    ytd_limit = st.number_input(
-                        "YTD",
-                        min_value=0.0,
-                        step=100.0, format="%.2f",
-                        key=_tytd_key,
-                        **_tytd_kwargs,
+                with c1a:
+                    _tname_kwargs = {"index": _dd_idx} if _tname_key not in st.session_state else {}
+                    sel = st.selectbox(
+                        "Tax Name",
+                        options=_dd_opts,
+                        key=_tname_key,
+                        label_visibility="collapsed",
+                        **_tname_kwargs,
                     )
-                    taxes[i]["ytd_limit"] = ytd_limit
-                with l2:
-                    _tlimit_kwargs = {"value": float(tax.get("limit_amount", 0.0))} if _tlimit_key not in st.session_state else {}
-                    limit_amount = st.number_input(
+
+                if sel == _WRITEIN:
+                    taxes[i]["custom_entry"] = True
+                    with c1b:
+                        custom_name = st.text_input(
+                            "Custom name",
+                            value=tax.get("custom_name", ""),
+                            key=f"{key_prefix}_custom_name_{i}",
+                            label_visibility="collapsed",
+                            placeholder="Enter tax name...",
+                        )
+                    taxes[i]["custom_name"] = custom_name
+                    taxes[i]["name"]        = custom_name
+                else:
+                    taxes[i]["custom_entry"] = False
+                    taxes[i]["name"]         = sel
+                    taxes[i].pop("custom_name", None)
+
+                with c2:
+                    if taxes[i].get("custom_entry", False):
+                        # Clear stale code if user just switched to write-in from a real tax
+                        if not _is_custom:
+                            taxes[i]["custom_code"] = ""
+                            st.session_state.pop(f"{key_prefix}_custom_code_{i}", None)
+                        custom_code = st.text_input(
+                            "Tax code",
+                            value=taxes[i].get("custom_code", ""),
+                            key=f"{key_prefix}_custom_code_{i}",
+                            label_visibility="collapsed",
+                            placeholder="Code",
+                        )
+                        taxes[i]["custom_code"] = custom_code
+                        code = custom_code
+                    else:
+                        code = DESC_TO_CODE.get(sel, "")
+                        taxes[i]["custom_code"] = code
+                        st.markdown(f'<div style="padding:8px 4px; font-size:1rem; font-weight:600; color:inherit;">{code or "—"}</div>', unsafe_allow_html=True)
+
+                with c3:
+                    _trate_key = f"{key_prefix}_trate_{i}"
+                    _trate_kwargs = {"value": float(tax["rate"])} if _trate_key not in st.session_state else {}
+                    rate = st.number_input(
+                        "Rate",
+                        min_value=0.0, max_value=100.0,
+                        step=0.0001, format="%.4f",
+                        key=_trate_key,
+                        label_visibility="collapsed",
+                        **_trate_kwargs,
+                    )
+                    taxes[i]["rate"] = rate
+
+                with c4:
+                    _no_limit = allow_no_limit_flag and (sel == "Federal - Employee Withholding")
+                    if _no_limit:
+                        st.session_state[f"{key_prefix}_tlimit_{i}"] = "No"
+                    limit = st.selectbox(
                         "Limit",
-                        min_value=0.0,
-                        step=100.0, format="%.2f",
-                        key=_tlimit_key,
-                        **_tlimit_kwargs,
+                        options=["No", "Yes"],
+                        key=f"{key_prefix}_tlimit_{i}",
+                        label_visibility="collapsed",
+                        disabled=_no_limit,
                     )
-                    taxes[i]["limit_amount"] = limit_amount
+                    taxes[i]["limit"] = limit
 
-    def _build_rates(taxes):
-        rates = []
-        for t in taxes:
-            if t.get("name"):
-                code = t.get("custom_code", "") or DESC_TO_CODE.get(t["name"], "")
-                if t.get("limit") == "Yes":
-                    ytd  = t.get("ytd_limit", 0.0)
-                    cap  = t.get("limit_amount", 0.0)
-                    room = max(0.0, cap - ytd)
-                    rates.append((t["name"], code, t["rate"], room, ytd))
+                with c5:
+                    st.button("✕", key=f"{key_prefix}_tremove_{i}",
+                              on_click=_remove_tax, args=(state_key, i))
+
+                if limit == "Yes":
+                    l1, l2 = st.columns([1, 1])
+                    _tytd_key     = f"{key_prefix}_tytd_{i}"
+                    _tlimit_key   = f"{key_prefix}_tlimit_amt_{i}"
+                    with l1:
+                        _tytd_kwargs = {"value": float(tax.get("ytd_limit", 0.0))} if _tytd_key not in st.session_state else {}
+                        ytd_limit = st.number_input(
+                            "YTD",
+                            min_value=0.0,
+                            step=100.0, format="%.2f",
+                            key=_tytd_key,
+                            **_tytd_kwargs,
+                        )
+                        taxes[i]["ytd_limit"] = ytd_limit
+                    with l2:
+                        _tlimit_kwargs = {"value": float(tax.get("limit_amount", 0.0))} if _tlimit_key not in st.session_state else {}
+                        limit_amount = st.number_input(
+                            "Limit",
+                            min_value=0.0,
+                            step=100.0, format="%.2f",
+                            key=_tlimit_key,
+                            **_tlimit_kwargs,
+                        )
+                        taxes[i]["limit_amount"] = limit_amount
+
+        def _build_rates(taxes):
+            rates = []
+            for t in taxes:
+                if t.get("name"):
+                    code = t.get("custom_code", "") or DESC_TO_CODE.get(t["name"], "")
+                    if t.get("limit") == "Yes":
+                        ytd  = t.get("ytd_limit", 0.0)
+                        cap  = t.get("limit_amount", 0.0)
+                        room = max(0.0, cap - ytd)
+                        rates.append((t["name"], code, t["rate"], room, ytd))
+                    else:
+                        rates.append((t["name"], code, t["rate"], None, None))
+            return rates
+
+        # ---- Build effective description lists (base + user-promoted) ----
+        _eff_ee_descs = EMPLOYEE_DESCRIPTIONS + [d for d in st.session_state.extra_employee_descs if d not in EMPLOYEE_DESCRIPTIONS]
+        _eff_er_descs = EMPLOYER_DESCRIPTIONS + [d for d in st.session_state.extra_employer_descs if d not in EMPLOYER_DESCRIPTIONS]
+
+        # ---- Employee taxes ----
+        render_section_divider("poa", "ADDITIONAL TAX RATES", "#8338ec")
+        st.caption("Employee withholdings")
+
+        eh1, eh2, eh3, eh4, eh5 = st.columns([3, 1.2, 1.2, 0.9, 0.4])
+        eh1.markdown("**Employee Tax Name**")
+        eh2.markdown("**Tax Code**")
+        eh3.markdown("**Rate (%)**")
+        eh4.markdown("**Limit**")
+
+        _tax_rows(st.session_state.employee_taxes, "ee", _eff_ee_descs, allow_no_limit_flag=True, state_key="employee_taxes")
+
+        if st.button("+ Add Employee Tax", use_container_width=True, key="ee_add_tax"):
+            st.session_state.employee_taxes.append({"name": "", "rate": 0.0, "limit": "No"})
+            st.rerun()
+
+        custom_rates = _build_rates(st.session_state.employee_taxes)
+
+        st.divider()
+
+        # ---- Employer taxes ----
+        st.caption("Employer contributions")
+
+        rh1, rh2, rh3, rh4, rh5 = st.columns([3, 1.2, 1.2, 0.9, 0.4])
+        rh1.markdown("**Employer Tax Name**")
+        rh2.markdown("**Tax Code**")
+        rh3.markdown("**Rate (%)**")
+        rh4.markdown("**Limit**")
+
+        _tax_rows(st.session_state.employer_taxes, "er", _eff_er_descs, state_key="employer_taxes")
+
+        if st.button("+ Add Employer Tax", use_container_width=True, key="er_add_tax"):
+            st.session_state.employer_taxes.append({"name": "", "rate": 0.0, "limit": "No"})
+            st.rerun()
+
+        employer_rates = _build_rates(st.session_state.employer_taxes)
+
+    else:
+        # ---- Multi-Employee Mode (MDV Batch) ----
+        render_section_divider("poa", "BATCH INPUT", "#ffbe0b")
+
+        _MULTI_TEMPLATE = "MID\tCID\tGrossPay\tYTD_Medicare\tState\nM123456\tC789\t5000.00\t150000\tCalifornia\nM234567\tC789\t3200.00\t80000\tNew York\nM345678\tC900\t4500.00\t200000\tTexas\n"
+
+        st.download_button(
+            "Download CSV Template",
+            data=_MULTI_TEMPLATE.replace("\t", ","),
+            file_name="multi_employee_template.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+        st.caption(
+            "Paste a tab or comma-separated table with columns: "
+            "**MID**, **CID**, **GrossPay**, **YTD_Medicare**, **State**. "
+            "Taxes auto-populate from state. Duplicates removed."
+        )
+
+        _multi_raw = st.text_area(
+            "Employee Table",
+            height=280,
+            placeholder="MID\tCID\tGrossPay\tYTD_Medicare\tState\nM123456\tC789\t5000.00\t150000\tCalifornia",
+            key="multi_emp_raw",
+            label_visibility="collapsed",
+        )
+
+        # Parse pasted table
+        _multi_df = None
+        _multi_err = None
+        if _multi_raw.strip():
+            _first_line = _multi_raw.splitlines()[0]
+            _sep = "\t" if _first_line.count("\t") >= _first_line.count(",") else ","
+            try:
+                _multi_df = pd.read_csv(io.StringIO(_multi_raw), sep=_sep, dtype=str).fillna("")
+                _multi_df = _multi_df.dropna(how="all")
+                if _multi_df.shape[1] >= 5:
+                    _multi_df = _multi_df.iloc[:, :5]
+                    _multi_df.columns = ["MID", "CID", "GrossPay", "YTD_Medicare", "State"]
+                    _multi_df = _multi_df.apply(lambda s: s.str.strip() if s.dtype == object else s)
+                    _multi_df = _multi_df[_multi_df["MID"].str.len() > 0]
+                    _multi_df = _multi_df.drop_duplicates(subset=["MID"]).reset_index(drop=True)
+                    # Resolve state abbreviations
+                    _multi_df["State"] = _multi_df["State"].apply(
+                        lambda s: STATE_ABBREV.get(s.upper(), s) if len(s) <= 3 else s
+                    )
+                    # Validate numeric columns
+                    _multi_df["GrossPay"] = pd.to_numeric(_multi_df["GrossPay"].str.replace(",", "").str.replace("$", ""), errors="coerce").fillna(0)
+                    _multi_df["YTD_Medicare"] = pd.to_numeric(_multi_df["YTD_Medicare"].str.replace(",", "").str.replace("$", ""), errors="coerce").fillna(0)
                 else:
-                    rates.append((t["name"], code, t["rate"], None, None))
-        return rates
+                    _multi_err = f"Expected 5 columns, got {_multi_df.shape[1]}. Need: MID, CID, GrossPay, YTD_Medicare, State"
+                    _multi_df = None
+            except Exception as e:
+                _multi_err = f"Could not parse table: {e}"
+                _multi_df = None
 
-    # ---- Build effective description lists (base + user-promoted) ----
-    _eff_ee_descs = EMPLOYEE_DESCRIPTIONS + [d for d in st.session_state.extra_employee_descs if d not in EMPLOYEE_DESCRIPTIONS]
-    _eff_er_descs = EMPLOYER_DESCRIPTIONS + [d for d in st.session_state.extra_employer_descs if d not in EMPLOYER_DESCRIPTIONS]
+        if _multi_err:
+            st.error(_multi_err)
+        elif _multi_df is not None and not _multi_df.empty:
+            st.caption(f"**{len(_multi_df)}** unique employee(s) parsed")
+            _preview = _multi_df.copy()
+            _preview["GrossPay"] = _preview["GrossPay"].apply(lambda v: f"${v:,.2f}")
+            _preview["YTD_Medicare"] = _preview["YTD_Medicare"].apply(lambda v: f"${v:,.0f}")
+            st.dataframe(_preview, use_container_width=True, hide_index=True, height=180)
 
-    # ---- Employee taxes ----
-    render_section_divider("poa", "ADDITIONAL TAX RATES", "#8338ec")
-    st.caption("Employee withholdings")
+            _multi_calculate = st.button("Calculate All", type="primary", use_container_width=True, key="multi_calc_btn")
+        else:
+            _multi_calculate = False
+            st.caption("Paste a table above to get started.")
 
-    eh1, eh2, eh3, eh4, eh5 = st.columns([3, 1.2, 1.2, 0.9, 0.4])
-    eh1.markdown("**Employee Tax Name**")
-    eh2.markdown("**Tax Code**")
-    eh3.markdown("**Rate (%)**")
-    eh4.markdown("**Limit**")
-
-    _tax_rows(st.session_state.employee_taxes, "ee", _eff_ee_descs, allow_no_limit_flag=True, state_key="employee_taxes")
-
-    if st.button("+ Add Employee Tax", use_container_width=True, key="ee_add_tax"):
-        st.session_state.employee_taxes.append({"name": "", "rate": 0.0, "limit": "No"})
-        st.rerun()
-
-    custom_rates = _build_rates(st.session_state.employee_taxes)
-
-    st.divider()
-
-    # ---- Employer taxes ----
-    st.caption("Employer contributions")
-
-    rh1, rh2, rh3, rh4, rh5 = st.columns([3, 1.2, 1.2, 0.9, 0.4])
-    rh1.markdown("**Employer Tax Name**")
-    rh2.markdown("**Tax Code**")
-    rh3.markdown("**Rate (%)**")
-    rh4.markdown("**Limit**")
-
-    _tax_rows(st.session_state.employer_taxes, "er", _eff_er_descs, state_key="employer_taxes")
-
-    if st.button("+ Add Employer Tax", use_container_width=True, key="er_add_tax"):
-        st.session_state.employer_taxes.append({"name": "", "rate": 0.0, "limit": "No"})
-        st.rerun()
-
-    employer_rates = _build_rates(st.session_state.employer_taxes)
+        # Store for right column access (use module-level var for button state since it resets on rerun)
+        st.session_state._multi_df = _multi_df if (_multi_df is not None and not _multi_df.empty) else None
+        _MULTI_CALC_CLICKED = _multi_calculate
 
 
 # -----------------------------------------------------------------------
 # RIGHT — Results
 # -----------------------------------------------------------------------
 with right:
-    render_section_divider("poa", "ADJUSTMENT INFO", "#ffbe0b")
+    if not _multi_mode:
+        render_section_divider("poa", "ADJUSTMENT INFO", "#ffbe0b")
 
-    f1, f2, f3 = st.columns([1, 1, 2])
-    with f1:
-        if "mid" not in st.session_state:
-            st.session_state.mid = ""
-        st.session_state.mid = st.text_input("MID", value=st.session_state.mid)
-    with f2:
-        if "cid" not in st.session_state:
-            st.session_state.cid = ""
-        st.session_state.cid = st.text_input("CID", value=st.session_state.cid)
-    with f3:
+        f1, f2, f3 = st.columns([1, 1, 2])
+        with f1:
+            if "mid" not in st.session_state:
+                st.session_state.mid = ""
+            st.session_state.mid = st.text_input("MID", value=st.session_state.mid)
+        with f2:
+            if "cid" not in st.session_state:
+                st.session_state.cid = ""
+            st.session_state.cid = st.text_input("CID", value=st.session_state.cid)
+        with f3:
+            if "adj_date" not in st.session_state:
+                from datetime import date
+                _today = date.today()
+                _days_until_friday = (4 - _today.weekday()) % 7
+                if _days_until_friday == 0:
+                    _days_until_friday = 7
+                from datetime import timedelta
+                st.session_state.adj_date = _today + timedelta(days=_days_until_friday)
+            st.session_state.adj_date = st.date_input("Adjustment Date", value=st.session_state.adj_date, format="MM/DD/YYYY")
+
+        TICKET_TYPES = ["", "MDV", "MISC Fully Taxable"]
+        if "ticket_type" not in st.session_state:
+            st.session_state.ticket_type = ""
+
+        STATES = [
+            "", "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+            "Connecticut", "Delaware", "District of Columbia", "Florida", "Georgia", "Hawaii", "Idaho",
+            "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
+            "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
+            "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada",
+            "New Hampshire", "New Jersey", "New Mexico", "New York",
+            "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon",
+            "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
+            "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
+            "West Virginia", "Wisconsin", "Wyoming",
+        ]
+        if "state" not in st.session_state:
+            st.session_state.state = ""
+
+        _TICKET_NOTES = {
+            "MDV":                "MDV refund - ",
+            "MISC Fully Taxable": "Recording Wages - ",
+        }
+
+        def _on_ticket_type_change():
+            preset = _TICKET_NOTES.get(st.session_state["_tt_select"], "")
+            if preset:
+                st.session_state.notes = preset
+
+        tt_col, state_col = st.columns(2)
+        with tt_col:
+            sel_tt = st.selectbox(
+                "Ticket Type",
+                options=TICKET_TYPES,
+                index=TICKET_TYPES.index(st.session_state.ticket_type),
+                key="_tt_select",
+                on_change=_on_ticket_type_change,
+            )
+            st.session_state.ticket_type = sel_tt
+        with state_col:
+            def _on_state_change():
+                new_state = st.session_state.state
+                if new_state == st.session_state.get("_last_applied_state"):
+                    return
+                st.session_state._last_applied_state = new_state
+                _cb_ee = EMPLOYEE_DESCRIPTIONS + [d for d in st.session_state.get("extra_employee_descs", []) if d not in EMPLOYEE_DESCRIPTIONS]
+                _cb_er = EMPLOYER_DESCRIPTIONS + [d for d in st.session_state.get("extra_employer_descs", []) if d not in EMPLOYER_DESCRIPTIONS]
+                new_ee = [{"name": d, "rate": 0.0, "limit": "No"} for d in _cb_ee if d.startswith(new_state + " - ")]
+                # For employer unemployment taxes, apply saved SUI wage base as the limit
+                _sui_year = st.session_state.get("calc_year", 2026)
+                _sui_wb   = SUI_WAGE_BASES.get(new_state, {}).get(_sui_year)
+                new_er_raw = [{"name": d, "rate": 0.0, "limit": "No"} for d in _cb_er if d.startswith(new_state + " - ")]
+                new_er = []
+                for t in new_er_raw:
+                    if "unemployment" in t["name"].lower() and _sui_wb:
+                        t["limit"]        = "Yes"
+                        t["limit_amount"] = float(_sui_wb)
+                        t["ytd_limit"]    = 0.0
+                    new_er.append(t)
+                if not new_ee:
+                    new_ee = [{"name": "", "rate": 0.0, "limit": "No"}]
+                if not new_er:
+                    new_er = [{"name": "", "rate": 0.0, "limit": "No"}]
+                # Clear stale widget keys beyond new list lengths
+                for i in range(max(len(st.session_state.employee_taxes), len(new_ee)) + 5):
+                    for suffix in ("tname", "trate", "tlimit", "tytd", "tlimit_amt"):
+                        st.session_state.pop(f"ee_{suffix}_{i}", None)
+                for i in range(max(len(st.session_state.employer_taxes), len(new_er)) + 5):
+                    for suffix in ("tname", "trate", "tlimit", "tytd", "tlimit_amt"):
+                        st.session_state.pop(f"er_{suffix}_{i}", None)
+                for i, tax in enumerate(new_ee):
+                    st.session_state[f"ee_tname_{i}"] = tax["name"]
+                    st.session_state[f"ee_trate_{i}"] = tax["rate"]
+                    st.session_state[f"ee_tlimit_{i}"] = tax["limit"]
+                for i, tax in enumerate(new_er):
+                    st.session_state[f"er_tname_{i}"] = tax["name"]
+                    st.session_state[f"er_trate_{i}"] = tax["rate"]
+                    st.session_state[f"er_tlimit_{i}"] = tax["limit"]
+                    if tax.get("limit") == "Yes":
+                        st.session_state[f"er_tlimit_amt_{i}"] = float(tax.get("limit_amount", 0.0))
+                        st.session_state[f"er_tytd_{i}"]       = float(tax.get("ytd_limit", 0.0))
+                st.session_state.employee_taxes = new_ee
+                st.session_state.employer_taxes = new_er
+
+            st.selectbox("State", options=STATES, key="state", on_change=_on_state_change)
+            _sui_display_wb = get_sui_wage_base(st.session_state.state, year)
+            if _sui_display_wb:
+                st.markdown(
+                    f'<p style="font-size:0.85rem; color: gray; margin-top:-8px;">SUI wage base ({st.session_state.state}, {year}): '
+                    f'<strong>${_sui_display_wb:,}</strong></p>',
+                    unsafe_allow_html=True,
+                )
+
+        render_section_divider("poa", "NOTES", "#8a9bb0")
+        if "notes" not in st.session_state:
+            st.session_state.notes = ""
+        st.session_state.notes = st.text_area(
+            "Notes",
+            value=st.session_state.notes,
+            height=150,
+            label_visibility="collapsed",
+            placeholder="Add any notes here...",
+        )
+
+        render_section_divider("poa", "RESULTS", "#06ffa5")
+
+        if calculate:
+            if mode.startswith("Net"):
+                gross  = gross_input
+                result = calc_taxes(gross, ytd_ss, ytd_med, ss_wage_base, custom_rates)
+                render_metric_row([{"label": "Net Pay", "value": fmt(result["net"]), "color": "#06ffa5"}])
+            else:
+                gross, result = gross_up(desired_net, ytd_ss, ytd_med, ss_wage_base, custom_rates)
+                render_metric_row([{"label": "Required Gross", "value": fmt(gross), "color": "#00e5ff"}])
+
+            st.session_state.last_gross          = gross
+            st.session_state.last_result         = result
+            st.session_state.last_ytd_med        = ytd_med
+            st.session_state.last_employer_rates = employer_rates
+
+            render_breakdown(gross, result, ss_wage_base, ytd_ss)
+            render_tax_table(gross, ytd_med, ss_wage_base, result, employer_rates)
+
+            eff = (result["total_tax"] / gross * 100) if gross else 0
+            render_metric_row([
+                {"label": "Total Tax", "value": fmt(result["total_tax"]), "color": "#ff006e"},
+                {"label": "Effective Rate", "value": f"{eff:.2f}%", "color": "#8338ec"},
+                {"label": "Net Pay", "value": fmt(result["net"]), "color": "#06ffa5"},
+            ])
+
+        elif "last_gross" in st.session_state:
+            _ytd = st.session_state.get("last_ytd_med", ytd_med)
+            render_breakdown(
+                st.session_state.last_gross,
+                st.session_state.last_result,
+                ss_wage_base,
+                ytd_ss,
+            )
+            render_tax_table(st.session_state.last_gross, _ytd, ss_wage_base, st.session_state.last_result, st.session_state.get("last_employer_rates", []))
+            eff = (st.session_state.last_result["total_tax"] / st.session_state.last_gross * 100) if st.session_state.last_gross else 0
+            render_metric_row([
+                {"label": "Total Tax", "value": fmt(st.session_state.last_result["total_tax"]), "color": "#ff006e"},
+                {"label": "Effective Rate", "value": f"{eff:.2f}%", "color": "#8338ec"},
+                {"label": "Net Pay", "value": fmt(st.session_state.last_result["net"]), "color": "#06ffa5"},
+            ])
+        else:
+            st.info("Configure inputs on the left and hit Calculate.")
+
+        # ---- CSV Export ----
+        if "last_gross" in st.session_state:
+            render_section_divider("poa", "CSV EXPORT", "#2563eb")
+
+            _calc_gross   = st.session_state.last_gross
+            _calc_result  = st.session_state.last_result
+            _calc_er      = st.session_state.get("last_employer_rates", [])
+            _calc_date    = st.session_state.adj_date.strftime("%m/%d/%Y")
+            _calc_mid     = st.session_state.mid.lstrip("M").lstrip("m")
+            _calc_cid     = st.session_state.cid.lstrip("C").lstrip("c")
+            _calc_notes   = " ".join(st.session_state.notes.splitlines()).strip()
+
+            _calc_cols = [
+                "account_type", "entry_type", "adjustment_date", "amount",
+                "cid", "tax_code", "member_id", "taxable_amount", "subj_gross",
+                "adjusted_gross", "adjusted_supl_gross", "gross_earnings_amount",
+                "reference_type", "reference_id", "notes",
+            ]
+
+            def _fmt(v):
+                return round(v, 2) if isinstance(v, (int, float)) else v
+
+            def _calc_row(account_type, entry_type, amount, tax_code, member_id, taxable_amount, subj_gross, adj_gross, adj_supl, gross_earnings, ref_type, ref_id, notes):
+                return {
+                    "account_type": account_type, "entry_type": entry_type,
+                    "adjustment_date": _calc_date, "amount": _fmt(amount),
+                    "cid": _calc_cid, "tax_code": tax_code, "member_id": member_id,
+                    "taxable_amount": _fmt(taxable_amount), "subj_gross": _fmt(subj_gross),
+                    "adjusted_gross": _fmt(adj_gross), "adjusted_supl_gross": _fmt(adj_supl),
+                    "gross_earnings_amount": _fmt(gross_earnings),
+                    "reference_type": ref_type, "reference_id": ref_id, "notes": notes,
+                }
+
+            _calc_rows = []
+
+            def _cr(tax_code, amount, taxable, gross_earnings=0.0):
+                # subj_gross   = Adj Gross column (always the full gross pay)
+                # adjusted_gross = taxable_amount (Taxable on Adj column)
+                # gross_earnings_amount = 0 normally; only populated for FUTA when fully over wage base
+                return _calc_row("Clearing", "Credit", amount, tax_code, _calc_mid,
+                                 taxable, _calc_gross, taxable, 0.0, gross_earnings, "x", 1, _calc_notes)
+
+            # Rows mirror Tax Detail exactly — same order, same conditions
+
+            # Federal - Employee Withholding (00-400) — always shown in tax detail
+            _fed_item = next((item for item in _calc_result.get("custom_items", []) if item[0] == "Federal - Employee Withholding"), None)
+            _fed_amt  = (_fed_item[4] if len(_fed_item) >= 6 else _fed_item[3]) if _fed_item else 0.0
+            _calc_rows.append(_cr("00-400", _fed_amt, _calc_gross))
+
+            # Social Security - Employee (00-403) — always shown
+            _calc_rows.append(_cr("00-403", _calc_result.get("ss_amount", 0), _calc_result.get("ss_taxable", 0)))
+
+            # Social Security - Employer (00-404) — always shown
+            _calc_rows.append(_cr("00-404", _calc_result.get("ss_amount", 0), _calc_result.get("ss_taxable", 0)))
+
+            # Medicare - Employee (00-406) — always shown
+            _calc_rows.append(_cr("00-406", _calc_result.get("med_amount", 0), _calc_gross))
+
+            # Additional Medicare - Employee (00-901) — only when shown in tax detail
+            if _calc_result.get("add_med_taxable", 0) > 0:
+                _calc_rows.append(_cr("00-901", _calc_result["add_med_amount"], _calc_result["add_med_taxable"]))
+
+            # Medicare - Employer (00-407) — always shown
+            _calc_rows.append(_cr("00-407", _calc_result.get("med_amount", 0), _calc_gross))
+
+            # FUTA (00-402) — always in CSV
+            # When fully over wage base (taxable = 0): gross_earnings_amount = adj gross
+            # When within wage base (taxable > 0): normal row
+            _futa_taxable = _calc_result.get("futa_taxable", 0)
+            _futa_amount  = _calc_result.get("futa_amount", 0)
+            if _futa_taxable == 0:
+                _calc_rows.append(_cr("00-402", _futa_amount, 0, gross_earnings=_calc_gross))
+            else:
+                _calc_rows.append(_cr("00-402", _futa_amount, _futa_taxable))
+
+            # Employee custom taxes (one row per item in tax detail, excluding 00-400)
+            for item in _calc_result.get("custom_items", []):
+                if item[0] == "Federal - Employee Withholding":
+                    continue
+                code    = item[1] if len(item) >= 6 else DESC_TO_CODE.get(item[0], "")
+                taxable = item[3] if len(item) >= 6 else item[2]
+                amt     = item[4] if len(item) >= 6 else (item[3] if len(item) >= 4 else item[2])
+                _calc_rows.append(_cr(code, amt, taxable))
+
+            # Employer custom taxes (one row per item in tax detail)
+            for name, code, rate, limit_room, ytd_display in _calc_er:
+                taxable = min(_calc_gross, limit_room) if limit_room is not None else _calc_gross
+                amt     = round(taxable * rate / 100, 2)
+                _calc_rows.append(_cr(code, amt, taxable))
+
+            # Company / Debit — sum of all Clearing / Credit amounts
+            _clearing_total = round(sum(r["amount"] for r in _calc_rows), 2)
+            _calc_rows.append(_calc_row("Company", "Debit", _clearing_total, "", "", "", "", "", "", "", "", "", ""))
+
+            import pandas as _pd_calc
+            import io as _io_calc
+            import csv as _csv_calc
+
+            _calc_df = _pd_calc.DataFrame(_calc_rows, columns=_calc_cols)
+            st.dataframe(_calc_df, use_container_width=True, hide_index=True)
+
+            _calc_buf = _io_calc.StringIO()
+            _calc_writer = _csv_calc.DictWriter(_calc_buf, fieldnames=_calc_cols)
+            _calc_writer.writeheader()
+            _calc_writer.writerows(_calc_rows)
+
+            _calc_missing = []
+            if not st.session_state.mid.strip():
+                _calc_missing.append("MID")
+            if not st.session_state.cid.strip():
+                _calc_missing.append("CID")
+
+            if _calc_missing:
+                st.error(f"Please enter a {' and '.join(_calc_missing)} before downloading.")
+            else:
+                st.download_button(
+                    label="Download CSV",
+                    data=_calc_buf.getvalue(),
+                    file_name=f"{st.session_state.mid} {st.session_state.cid} {st.session_state.ticket_type or 'Calc'}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="calc_download_csv",
+                )
+
+            if st.session_state.get("ticket_type") == "MDV":
+                render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
+
+                st.caption("Paste the CS Tools link to make the header clickable")
+                st.text_input("CS Tools Link", placeholder="Paste link here...", key="calc_cs_link", label_visibility="visible")
+                _default_debit = st.session_state.adj_date.strftime("%m/%d/%Y") if "adj_date" in st.session_state and st.session_state.adj_date else ""
+                if "calc_debit_date" not in st.session_state or not st.session_state.calc_debit_date:
+                    st.session_state.calc_debit_date = _default_debit
+                st.text_input("Debit Date", placeholder="e.g. 01/15/2025", key="calc_debit_date", label_visibility="visible")
+
+                st.divider()
+
+                _calc_debit_date = st.session_state.get("calc_debit_date", "").strip() or "XXXXX"
+                _calc_cs_url     = st.session_state.get("calc_cs_link", "").strip()
+                _calc_here_link  = (
+                    f'<a href="{_calc_cs_url}" target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
+                    if _calc_cs_url else 'here'
+                )
+                _bdown_rows = [
+                    ("Gross Pay", fmt(_calc_gross), False),
+                    ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
+                    ("&minus; Medicare", fmt(-_calc_result.get("med_amount", 0)), False),
+                ]
+                if _calc_result.get("add_med_amount", 0) > 0:
+                    _bdown_rows.append(("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]), False))
+                for _ci in _calc_result.get("custom_items", []):
+                    _ci_name = _ci[0]
+                    _ci_amt  = _ci[4] if len(_ci) >= 6 else (_ci[3] if len(_ci) >= 4 else _ci[2])
+                    if _ci_amt == 0 or _ci_name == "Federal - Employee Withholding":
+                        continue
+                    _bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
+                _bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
+
+                _bdown_table_html = (
+                    '<table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:8px;">'
+                    '<thead><tr style="border-bottom:2px solid #ccc;">'
+                    '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
+                    '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
+                    '</tr></thead><tbody>'
+                )
+                for _lbl, _amt, _bold in _bdown_rows:
+                    _a = f"<b>{_amt}</b>" if _bold else _amt
+                    _l = f"<b>{_lbl}</b>" if _bold else _lbl
+                    _bdown_table_html += f'<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:7px 4px;">{_l}</td><td style="text-align:right; padding:7px 8px;">{_a}</td></tr>'
+                _bdown_table_html += "</tbody></table>"
+
+                _full_copy_html = (
+                    f'<p style="margin:0 0 8px 0; line-height:1.4;">'
+                    f'The adjustment has been completed and can be viewed {_calc_here_link}. '
+                    f'The employer will be debited ${_clearing_total:,.2f} on {_calc_debit_date} '
+                    f'and the admin needs to pay the employee ${_calc_result.get("net", 0):,.2f} as a non taxable payment.'
+                    f'</p>'
+                    f'{_bdown_table_html}'
+                    f'<p style="font-size:0.9rem; margin-top:12px;">'
+                    f'The SOP for refunding benefit deductions can be found '
+                    f'<a href="https://justworks.atlassian.net/wiki/spaces/CX/pages/474644752/Refunding+Benefits+Deductions" '
+                    f'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
+                    f' for your reference.</p>'
+                    f'<p style="font-size:0.9rem; margin-top:4px;">'
+                    f'Visit our team\'s page '
+                    f'<a href="https://justworks.atlassian.net/wiki/spaces/PAY/pages/1951466586/Payroll+Operations+Team+-+PTU" '
+                    f'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
+                    f'.</p>'
+                )
+                render_copyable_html(_full_copy_html, "Copy Summary to Clipboard")
+
+            elif st.session_state.get("ticket_type") == "MISC Fully Taxable":
+                render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
+
+                st.caption("Paste the CS Tools link to make the header clickable")
+                st.text_input("CS Tools Link", placeholder="Paste link here...", key="calc_cs_link", label_visibility="visible")
+                st.text_input("Debit Date", placeholder="e.g. 01/15/2025", key="calc_debit_date", label_visibility="visible")
+
+                st.divider()
+
+                _misc_debit_date = st.session_state.get("calc_debit_date", "").strip() or "XXXXX"
+                _misc_cs_url     = st.session_state.get("calc_cs_link", "").strip()
+                _misc_adj_header = (
+                    f'<a href="{_misc_cs_url}" target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">ADJ in CS Tools</a>'
+                    if _misc_cs_url else '<strong>ADJ in CS Tools</strong>'
+                )
+                _misc_bdown_rows = [
+                    ("Gross Pay", fmt(_calc_gross), False),
+                    ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
+                    ("&minus; Medicare", fmt(-_calc_result.get("med_amount", 0)), False),
+                ]
+                if _calc_result.get("add_med_amount", 0) > 0:
+                    _misc_bdown_rows.append(("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]), False))
+                for _ci in _calc_result.get("custom_items", []):
+                    _ci_name = _ci[0]
+                    _ci_amt  = _ci[4] if len(_ci) >= 6 else (_ci[3] if len(_ci) >= 4 else _ci[2])
+                    if _ci_amt == 0 or _ci_name == "Federal - Employee Withholding":
+                        continue
+                    _misc_bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
+                _misc_bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
+
+                _misc_table_html = (
+                    '<table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:8px;">'
+                    '<thead><tr style="border-bottom:2px solid #ccc;">'
+                    '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
+                    '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
+                    '</tr></thead><tbody>'
+                )
+                for _lbl, _amt, _bold in _misc_bdown_rows:
+                    _a = f"<b>{_amt}</b>" if _bold else _amt
+                    _l = f"<b>{_lbl}</b>" if _bold else _lbl
+                    _misc_table_html += f'<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:7px 4px;">{_l}</td><td style="text-align:right; padding:7px 8px;">{_a}</td></tr>'
+                _misc_table_html += "</tbody></table>"
+
+                _misc_full_copy_html = (
+                    f'<p style="margin:0 0 8px 0; line-height:1.4;">The adjustment has been completed and can be viewed below:</p>'
+                    f'<p style="margin:0 0 8px 0; line-height:1.4;">'
+                    f'{_misc_adj_header}<br>'
+                    f'Employer Debit: ${_clearing_total:,.2f} on {_misc_debit_date}'
+                    f'</p>'
+                    f'{_misc_table_html}'
+                )
+                render_copyable_html(_misc_full_copy_html, "Copy Summary to Clipboard")
+
+            else:
+                render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
+
+                st.caption("Paste the CS Tools link to make the header clickable")
+                st.text_input("CS Tools Link", placeholder="Paste link here...", key="calc_cs_link", label_visibility="visible")
+                _default_debit = st.session_state.adj_date.strftime("%m/%d/%Y") if "adj_date" in st.session_state and st.session_state.adj_date else ""
+                if "calc_debit_date" not in st.session_state or not st.session_state.calc_debit_date:
+                    st.session_state.calc_debit_date = _default_debit
+                st.text_input("Debit Date", placeholder="e.g. 01/15/2025", key="calc_debit_date", label_visibility="visible")
+
+                st.divider()
+                _gen_debit_date = st.session_state.get("calc_debit_date", "").strip() or "XXXXX"
+                _gen_cs_url     = st.session_state.get("calc_cs_link", "").strip()
+                _gen_here_link  = (
+                    f'<a href="{_gen_cs_url}" target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
+                    if _gen_cs_url else 'here'
+                )
+                _gen_bdown_rows = [
+                    ("Gross Pay", fmt(_calc_gross), False),
+                    ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
+                    ("&minus; Medicare", fmt(-_calc_result.get("med_amount", 0)), False),
+                ]
+                if _calc_result.get("add_med_amount", 0) > 0:
+                    _gen_bdown_rows.append(("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]), False))
+                for _ci in _calc_result.get("custom_items", []):
+                    _ci_name = _ci[0]
+                    _ci_amt  = _ci[4] if len(_ci) >= 6 else (_ci[3] if len(_ci) >= 4 else _ci[2])
+                    if _ci_amt == 0 or _ci_name == "Federal - Employee Withholding":
+                        continue
+                    _gen_bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
+                _gen_bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
+
+                _gen_table_html = (
+                    '<table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:8px;">'
+                    '<thead><tr style="border-bottom:2px solid #ccc;">'
+                    '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
+                    '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
+                    '</tr></thead><tbody>'
+                )
+                for _lbl, _amt, _bold in _gen_bdown_rows:
+                    _a = f"<b>{_amt}</b>" if _bold else _amt
+                    _l = f"<b>{_lbl}</b>" if _bold else _lbl
+                    _gen_table_html += f'<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:7px 4px;">{_l}</td><td style="text-align:right; padding:7px 8px;">{_a}</td></tr>'
+                _gen_table_html += "</tbody></table>"
+
+                _gen_full_copy_html = (
+                    f'<p style="margin:0 0 8px 0; line-height:1.4;">'
+                    f'The adjustment has been completed and can be viewed {_gen_here_link}. '
+                    f'The employer will be debited ${_clearing_total:,.2f} on {_gen_debit_date}.'
+                    f'</p>'
+                    f'{_gen_table_html}'
+                )
+                render_copyable_html(_gen_full_copy_html, "Copy Summary to Clipboard")
+
+    else:
+        # ---- Multi-Employee Results ----
+        render_section_divider("poa", "BATCH SETTINGS", "#ffbe0b")
+
         if "adj_date" not in st.session_state:
-            from datetime import date
-            _today = date.today()
+            from datetime import date as _date_cls, timedelta as _td_cls
+            _today = _date_cls.today()
             _days_until_friday = (4 - _today.weekday()) % 7
             if _days_until_friday == 0:
                 _days_until_friday = 7
-            from datetime import timedelta
-            st.session_state.adj_date = _today + timedelta(days=_days_until_friday)
-        st.session_state.adj_date = st.date_input("Adjustment Date", value=st.session_state.adj_date, format="MM/DD/YYYY")
+            st.session_state.adj_date = _today + _td_cls(days=_days_until_friday)
+        st.session_state.adj_date = st.date_input("Adjustment Date", value=st.session_state.adj_date, format="MM/DD/YYYY", key="multi_adj_date")
 
-    TICKET_TYPES = ["", "MDV", "MISC Fully Taxable"]
-    if "ticket_type" not in st.session_state:
-        st.session_state.ticket_type = ""
+        if "notes" not in st.session_state:
+            st.session_state.notes = "MDV refund - "
+        st.session_state.notes = st.text_input("Notes", value=st.session_state.notes, key="multi_notes")
 
-    STATES = [
-        "", "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
-        "Connecticut", "Delaware", "District of Columbia", "Florida", "Georgia", "Hawaii", "Idaho",
-        "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
-        "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
-        "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada",
-        "New Hampshire", "New Jersey", "New Mexico", "New York",
-        "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon",
-        "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
-        "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
-        "West Virginia", "Wisconsin", "Wyoming",
-    ]
-    if "state" not in st.session_state:
-        st.session_state.state = ""
+        render_section_divider("poa", "RESULTS", "#06ffa5")
 
-    _TICKET_NOTES = {
-        "MDV":                "MDV refund - ",
-        "MISC Fully Taxable": "Recording Wages - ",
-    }
+        _m_df = st.session_state.get("_multi_df")
+        _m_calc = _MULTI_CALC_CLICKED
 
-    def _on_ticket_type_change():
-        preset = _TICKET_NOTES.get(st.session_state["_tt_select"], "")
-        if preset:
-            st.session_state.notes = preset
+        if _m_calc and _m_df is not None and not _m_df.empty:
+            # Run batch calculation
+            _batch_results = []
+            _batch_csv_rows = []
+            _adj_date_str = st.session_state.adj_date.strftime("%m/%d/%Y")
+            _notes_str = st.session_state.notes.strip().replace("\n", " ")
+            _year = 2026
+            _ss_wb = SS_WAGE_BASES[_year]
 
-    tt_col, state_col = st.columns(2)
-    with tt_col:
-        sel_tt = st.selectbox(
-            "Ticket Type",
-            options=TICKET_TYPES,
-            index=TICKET_TYPES.index(st.session_state.ticket_type),
-            key="_tt_select",
-            on_change=_on_ticket_type_change,
-        )
-        st.session_state.ticket_type = sel_tt
-    with state_col:
-        def _on_state_change():
-            new_state = st.session_state.state
-            if new_state == st.session_state.get("_last_applied_state"):
-                return
-            st.session_state._last_applied_state = new_state
-            _cb_ee = EMPLOYEE_DESCRIPTIONS + [d for d in st.session_state.get("extra_employee_descs", []) if d not in EMPLOYEE_DESCRIPTIONS]
-            _cb_er = EMPLOYER_DESCRIPTIONS + [d for d in st.session_state.get("extra_employer_descs", []) if d not in EMPLOYER_DESCRIPTIONS]
-            new_ee = [{"name": d, "rate": 0.0, "limit": "No"} for d in _cb_ee if d.startswith(new_state + " - ")]
-            # For employer unemployment taxes, apply saved SUI wage base as the limit
-            _sui_year = st.session_state.get("calc_year", 2026)
-            _sui_wb   = SUI_WAGE_BASES.get(new_state, {}).get(_sui_year)
-            new_er_raw = [{"name": d, "rate": 0.0, "limit": "No"} for d in _cb_er if d.startswith(new_state + " - ")]
-            new_er = []
-            for t in new_er_raw:
-                if "unemployment" in t["name"].lower() and _sui_wb:
-                    t["limit"]        = "Yes"
-                    t["limit_amount"] = float(_sui_wb)
-                    t["ytd_limit"]    = 0.0
-                new_er.append(t)
-            if not new_ee:
-                new_ee = [{"name": "", "rate": 0.0, "limit": "No"}]
-            if not new_er:
-                new_er = [{"name": "", "rate": 0.0, "limit": "No"}]
-            # Clear stale widget keys beyond new list lengths
-            for i in range(max(len(st.session_state.employee_taxes), len(new_ee)) + 5):
-                for suffix in ("tname", "trate", "tlimit", "tytd", "tlimit_amt"):
-                    st.session_state.pop(f"ee_{suffix}_{i}", None)
-            for i in range(max(len(st.session_state.employer_taxes), len(new_er)) + 5):
-                for suffix in ("tname", "trate", "tlimit", "tytd", "tlimit_amt"):
-                    st.session_state.pop(f"er_{suffix}_{i}", None)
-            for i, tax in enumerate(new_ee):
-                st.session_state[f"ee_tname_{i}"] = tax["name"]
-                st.session_state[f"ee_trate_{i}"] = tax["rate"]
-                st.session_state[f"ee_tlimit_{i}"] = tax["limit"]
-            for i, tax in enumerate(new_er):
-                st.session_state[f"er_tname_{i}"] = tax["name"]
-                st.session_state[f"er_trate_{i}"] = tax["rate"]
-                st.session_state[f"er_tlimit_{i}"] = tax["limit"]
-                if tax.get("limit") == "Yes":
-                    st.session_state[f"er_tlimit_amt_{i}"] = float(tax.get("limit_amount", 0.0))
-                    st.session_state[f"er_tytd_{i}"]       = float(tax.get("ytd_limit", 0.0))
-            st.session_state.employee_taxes = new_ee
-            st.session_state.employer_taxes = new_er
+            for _, row in _m_df.iterrows():
+                _mid_raw = str(row["MID"]).strip()
+                _cid_raw = str(row["CID"]).strip()
+                _gross = float(row["GrossPay"])
+                _ytd_med = float(row["YTD_Medicare"])
+                _state = str(row["State"]).strip()
+                _mid_num = _mid_raw.lstrip("Mm")
+                _cid_num = _cid_raw.lstrip("Cc")
 
-        st.selectbox("State", options=STATES, key="state", on_change=_on_state_change)
-        _sui_display_wb = get_sui_wage_base(st.session_state.state, year)
-        if _sui_display_wb:
-            st.markdown(
-                f'<p style="font-size:0.85rem; color: gray; margin-top:-8px;">SUI wage base ({st.session_state.state}, {year}): '
-                f'<strong>${_sui_display_wb:,}</strong></p>',
-                unsafe_allow_html=True,
-            )
+                # Build state-based tax rates
+                _ee_rates = []
+                _er_rates = []
+                for d in EMPLOYEE_DESCRIPTIONS:
+                    if d.startswith(_state + " - "):
+                        _ee_rates.append((d, DESC_TO_CODE.get(d, ""), 0.0, None, None))
+                for d in EMPLOYER_DESCRIPTIONS:
+                    if d.startswith(_state + " - "):
+                        _sui_wb = SUI_WAGE_BASES.get(_state, {}).get(_year)
+                        if "unemployment" in d.lower() and _sui_wb:
+                            _room = max(0.0, float(_sui_wb) - _ytd_med)
+                            _er_rates.append((d, DESC_TO_CODE.get(d, ""), 0.0, _room, _ytd_med))
+                        else:
+                            _er_rates.append((d, DESC_TO_CODE.get(d, ""), 0.0, None, None))
 
-    render_section_divider("poa", "NOTES", "#8a9bb0")
-    if "notes" not in st.session_state:
-        st.session_state.notes = ""
-    st.session_state.notes = st.text_area(
-        "Notes",
-        value=st.session_state.notes,
-        height=150,
-        label_visibility="collapsed",
-        placeholder="Add any notes here...",
-    )
+                _result = calc_taxes(_gross, _ytd_med, _ytd_med, _ss_wb, _ee_rates)
 
-    render_section_divider("poa", "RESULTS", "#06ffa5")
+                _batch_results.append({
+                    "MID": _mid_raw, "CID": _cid_raw, "State": _state,
+                    "Gross": _gross, "Net": _result["net"],
+                    "Total Tax": _result["total_tax"],
+                    "_result": _result, "_er_rates": _er_rates,
+                    "_mid_num": _mid_num, "_cid_num": _cid_num,
+                })
 
-    if calculate:
-        if mode.startswith("Net"):
-            gross  = gross_input
-            result = calc_taxes(gross, ytd_ss, ytd_med, ss_wage_base, custom_rates)
-            render_metric_row([{"label": "Net Pay", "value": fmt(result["net"]), "color": "#06ffa5"}])
-        else:
-            gross, result = gross_up(desired_net, ytd_ss, ytd_med, ss_wage_base, custom_rates)
-            render_metric_row([{"label": "Required Gross", "value": fmt(gross), "color": "#00e5ff"}])
+                # Build CSV rows for this employee
+                def _make_row(acct, entry, amt, tax_code, mid, taxable, subj_g, adj_g, adj_s, ge, ref_t, ref_id, notes):
+                    return {
+                        "account_type": acct, "entry_type": entry,
+                        "adjustment_date": _adj_date_str, "amount": round(amt, 2),
+                        "cid": _cid_num, "tax_code": tax_code, "member_id": mid,
+                        "taxable_amount": round(taxable, 2) if isinstance(taxable, (int, float)) else taxable,
+                        "subj_gross": round(subj_g, 2) if isinstance(subj_g, (int, float)) else subj_g,
+                        "adjusted_gross": round(adj_g, 2) if isinstance(adj_g, (int, float)) else adj_g,
+                        "adjusted_supl_gross": round(adj_s, 2) if isinstance(adj_s, (int, float)) else adj_s,
+                        "gross_earnings_amount": round(ge, 2) if isinstance(ge, (int, float)) else ge,
+                        "reference_type": ref_t, "reference_id": ref_id, "notes": notes,
+                    }
 
-        st.session_state.last_gross          = gross
-        st.session_state.last_result         = result
-        st.session_state.last_ytd_med        = ytd_med
-        st.session_state.last_employer_rates = employer_rates
+                def _cr(tc, amt, taxable, ge=0.0):
+                    return _make_row("Clearing", "Credit", amt, tc, _mid_num, taxable, _gross, taxable, 0.0, ge, "x", 1, _notes_str)
 
-        render_breakdown(gross, result, ss_wage_base, ytd_ss)
-        render_tax_table(gross, ytd_med, ss_wage_base, result, employer_rates)
+                # Federal withholding
+                _fed_item = next((item for item in _result.get("custom_items", []) if item[0] == "Federal - Employee Withholding"), None)
+                _fed_amt = (_fed_item[4] if len(_fed_item) >= 6 else _fed_item[3]) if _fed_item else 0.0
+                _batch_csv_rows.append(_cr("00-400", _fed_amt, _gross))
 
-        eff = (result["total_tax"] / gross * 100) if gross else 0
-        render_metric_row([
-            {"label": "Total Tax", "value": fmt(result["total_tax"]), "color": "#ff006e"},
-            {"label": "Effective Rate", "value": f"{eff:.2f}%", "color": "#8338ec"},
-            {"label": "Net Pay", "value": fmt(result["net"]), "color": "#06ffa5"},
-        ])
+                # SS Employee & Employer
+                _batch_csv_rows.append(_cr("00-403", _result["ss_amount"], _result["ss_taxable"]))
+                _batch_csv_rows.append(_cr("00-404", _result["ss_amount"], _result["ss_taxable"]))
 
-    elif "last_gross" in st.session_state:
-        _ytd = st.session_state.get("last_ytd_med", ytd_med)
-        render_breakdown(
-            st.session_state.last_gross,
-            st.session_state.last_result,
-            ss_wage_base,
-            ytd_ss,
-        )
-        render_tax_table(st.session_state.last_gross, _ytd, ss_wage_base, st.session_state.last_result, st.session_state.get("last_employer_rates", []))
-        eff = (st.session_state.last_result["total_tax"] / st.session_state.last_gross * 100) if st.session_state.last_gross else 0
-        render_metric_row([
-            {"label": "Total Tax", "value": fmt(st.session_state.last_result["total_tax"]), "color": "#ff006e"},
-            {"label": "Effective Rate", "value": f"{eff:.2f}%", "color": "#8338ec"},
-            {"label": "Net Pay", "value": fmt(st.session_state.last_result["net"]), "color": "#06ffa5"},
-        ])
-    else:
-        st.info("Configure inputs on the left and hit Calculate.")
+                # Medicare Employee
+                _batch_csv_rows.append(_cr("00-406", _result["med_amount"], _gross))
 
-    # ---- CSV Export ----
-    if "last_gross" in st.session_state:
-        render_section_divider("poa", "CSV EXPORT", "#2563eb")
+                # Additional Medicare
+                if _result.get("add_med_taxable", 0) > 0:
+                    _batch_csv_rows.append(_cr("00-901", _result["add_med_amount"], _result["add_med_taxable"]))
 
-        _calc_gross   = st.session_state.last_gross
-        _calc_result  = st.session_state.last_result
-        _calc_er      = st.session_state.get("last_employer_rates", [])
-        _calc_date    = st.session_state.adj_date.strftime("%m/%d/%Y")
-        _calc_mid     = st.session_state.mid.lstrip("M").lstrip("m")
-        _calc_cid     = st.session_state.cid.lstrip("C").lstrip("c")
-        _calc_notes   = " ".join(st.session_state.notes.splitlines()).strip()
+                # Medicare Employer
+                _batch_csv_rows.append(_cr("00-407", _result["med_amount"], _gross))
 
-        _calc_cols = [
-            "account_type", "entry_type", "adjustment_date", "amount",
-            "cid", "tax_code", "member_id", "taxable_amount", "subj_gross",
-            "adjusted_gross", "adjusted_supl_gross", "gross_earnings_amount",
-            "reference_type", "reference_id", "notes",
-        ]
+                # FUTA
+                _futa_taxable = _result.get("futa_taxable", 0)
+                _futa_amount = _result.get("futa_amount", 0)
+                if _futa_taxable == 0:
+                    _batch_csv_rows.append(_cr("00-402", _futa_amount, 0, ge=_gross))
+                else:
+                    _batch_csv_rows.append(_cr("00-402", _futa_amount, _futa_taxable))
 
-        def _fmt(v):
-            return round(v, 2) if isinstance(v, (int, float)) else v
+                # Employee custom taxes (state taxes)
+                for item in _result.get("custom_items", []):
+                    if item[0] == "Federal - Employee Withholding":
+                        continue
+                    code = item[1] if len(item) >= 6 else DESC_TO_CODE.get(item[0], "")
+                    taxable = item[3] if len(item) >= 6 else item[2]
+                    amt = item[4] if len(item) >= 6 else (item[3] if len(item) >= 4 else item[2])
+                    _batch_csv_rows.append(_cr(code, amt, taxable))
 
-        def _calc_row(account_type, entry_type, amount, tax_code, member_id, taxable_amount, subj_gross, adj_gross, adj_supl, gross_earnings, ref_type, ref_id, notes):
-            return {
-                "account_type": account_type, "entry_type": entry_type,
-                "adjustment_date": _calc_date, "amount": _fmt(amount),
-                "cid": _calc_cid, "tax_code": tax_code, "member_id": member_id,
-                "taxable_amount": _fmt(taxable_amount), "subj_gross": _fmt(subj_gross),
-                "adjusted_gross": _fmt(adj_gross), "adjusted_supl_gross": _fmt(adj_supl),
-                "gross_earnings_amount": _fmt(gross_earnings),
-                "reference_type": ref_type, "reference_id": ref_id, "notes": notes,
-            }
+                # Employer custom taxes (state taxes)
+                for name, code, rate, limit_room, ytd_display in _er_rates:
+                    taxable = min(_gross, limit_room) if limit_room is not None else _gross
+                    amt = round(taxable * rate / 100, 2)
+                    _batch_csv_rows.append(_cr(code, amt, taxable))
 
-        _calc_rows = []
+            # Add per-CID debit lines
+            _cid_totals = {}
+            for r in _batch_csv_rows:
+                cid = r["cid"]
+                _cid_totals[cid] = _cid_totals.get(cid, 0.0) + r["amount"]
 
-        def _cr(tax_code, amount, taxable, gross_earnings=0.0):
-            # subj_gross   = Adj Gross column (always the full gross pay)
-            # adjusted_gross = taxable_amount (Taxable on Adj column)
-            # gross_earnings_amount = 0 normally; only populated for FUTA when fully over wage base
-            return _calc_row("Clearing", "Credit", amount, tax_code, _calc_mid,
-                             taxable, _calc_gross, taxable, 0.0, gross_earnings, "x", 1, _calc_notes)
+            for cid, total in _cid_totals.items():
+                _batch_csv_rows.append(_make_row("Company", "Debit", round(total, 2), "", "", "", "", "", "", "", "", "", ""))
+                _batch_csv_rows[-1]["cid"] = cid
 
-        # Rows mirror Tax Detail exactly — same order, same conditions
+            # Store results for display
+            st.session_state._batch_results = _batch_results
+            st.session_state._batch_csv_rows = _batch_csv_rows
+            st.session_state._batch_cid_totals = _cid_totals
 
-        # Federal - Employee Withholding (00-400) — always shown in tax detail
-        _fed_item = next((item for item in _calc_result.get("custom_items", []) if item[0] == "Federal - Employee Withholding"), None)
-        _fed_amt  = (_fed_item[4] if len(_fed_item) >= 6 else _fed_item[3]) if _fed_item else 0.0
-        _calc_rows.append(_cr("00-400", _fed_amt, _calc_gross))
+        # Display results if available
+        if st.session_state.get("_batch_results"):
+            _br = st.session_state._batch_results
+            _bc = st.session_state._batch_csv_rows
+            _ct = st.session_state._batch_cid_totals
 
-        # Social Security - Employee (00-403) — always shown
-        _calc_rows.append(_cr("00-403", _calc_result.get("ss_amount", 0), _calc_result.get("ss_taxable", 0)))
+            _total_gross = sum(r["Gross"] for r in _br)
+            _total_net = sum(r["Net"] for r in _br)
+            _total_tax = sum(r["Total Tax"] for r in _br)
+            _total_debit = sum(_ct.values())
 
-        # Social Security - Employer (00-404) — always shown
-        _calc_rows.append(_cr("00-404", _calc_result.get("ss_amount", 0), _calc_result.get("ss_taxable", 0)))
+            render_metric_row([
+                {"label": "Employees", "value": str(len(_br)), "color": "#00e5ff"},
+                {"label": "Total Gross", "value": f"${_total_gross:,.2f}", "color": "#06ffa5"},
+                {"label": "Total Net", "value": f"${_total_net:,.2f}", "color": "#ffbe0b"},
+                {"label": "Total Debit", "value": f"${_total_debit:,.2f}", "color": "#ff006e"},
+            ])
 
-        # Medicare - Employee (00-406) — always shown
-        _calc_rows.append(_cr("00-406", _calc_result.get("med_amount", 0), _calc_gross))
+            # Summary table
+            _summary_df = pd.DataFrame([
+                {"MID": r["MID"], "CID": r["CID"], "State": r["State"],
+                 "Gross": f"${r['Gross']:,.2f}", "Net": f"${r['Net']:,.2f}",
+                 "Tax": f"${r['Total Tax']:,.2f}"}
+                for r in _br
+            ])
+            st.dataframe(_summary_df, use_container_width=True, hide_index=True)
 
-        # Additional Medicare - Employee (00-901) — only when shown in tax detail
-        if _calc_result.get("add_med_taxable", 0) > 0:
-            _calc_rows.append(_cr("00-901", _calc_result["add_med_amount"], _calc_result["add_med_taxable"]))
+            # CSV Export
+            render_section_divider("poa", "CSV EXPORT", "#2563eb")
+            _csv_cols = [
+                "account_type", "entry_type", "adjustment_date", "amount",
+                "cid", "tax_code", "member_id", "taxable_amount", "subj_gross",
+                "adjusted_gross", "adjusted_supl_gross", "gross_earnings_amount",
+                "reference_type", "reference_id", "notes",
+            ]
+            _csv_df = pd.DataFrame(_bc, columns=_csv_cols)
+            import io as _bio
+            _csv_buf = _bio.StringIO()
+            _csv_df.to_csv(_csv_buf, index=False)
 
-        # Medicare - Employer (00-407) — always shown
-        _calc_rows.append(_cr("00-407", _calc_result.get("med_amount", 0), _calc_gross))
-
-        # FUTA (00-402) — always in CSV
-        # When fully over wage base (taxable = 0): gross_earnings_amount = adj gross
-        # When within wage base (taxable > 0): normal row
-        _futa_taxable = _calc_result.get("futa_taxable", 0)
-        _futa_amount  = _calc_result.get("futa_amount", 0)
-        if _futa_taxable == 0:
-            _calc_rows.append(_cr("00-402", _futa_amount, 0, gross_earnings=_calc_gross))
-        else:
-            _calc_rows.append(_cr("00-402", _futa_amount, _futa_taxable))
-
-        # Employee custom taxes (one row per item in tax detail, excluding 00-400)
-        for item in _calc_result.get("custom_items", []):
-            if item[0] == "Federal - Employee Withholding":
-                continue
-            code    = item[1] if len(item) >= 6 else DESC_TO_CODE.get(item[0], "")
-            taxable = item[3] if len(item) >= 6 else item[2]
-            amt     = item[4] if len(item) >= 6 else (item[3] if len(item) >= 4 else item[2])
-            _calc_rows.append(_cr(code, amt, taxable))
-
-        # Employer custom taxes (one row per item in tax detail)
-        for name, code, rate, limit_room, ytd_display in _calc_er:
-            taxable = min(_calc_gross, limit_room) if limit_room is not None else _calc_gross
-            amt     = round(taxable * rate / 100, 2)
-            _calc_rows.append(_cr(code, amt, taxable))
-
-        # Company / Debit — sum of all Clearing / Credit amounts
-        _clearing_total = round(sum(r["amount"] for r in _calc_rows), 2)
-        _calc_rows.append(_calc_row("Company", "Debit", _clearing_total, "", "", "", "", "", "", "", "", "", ""))
-
-        import pandas as _pd_calc
-        import io as _io_calc
-        import csv as _csv_calc
-
-        _calc_df = _pd_calc.DataFrame(_calc_rows, columns=_calc_cols)
-        st.dataframe(_calc_df, use_container_width=True, hide_index=True)
-
-        _calc_buf = _io_calc.StringIO()
-        _calc_writer = _csv_calc.DictWriter(_calc_buf, fieldnames=_calc_cols)
-        _calc_writer.writeheader()
-        _calc_writer.writerows(_calc_rows)
-
-        _calc_missing = []
-        if not st.session_state.mid.strip():
-            _calc_missing.append("MID")
-        if not st.session_state.cid.strip():
-            _calc_missing.append("CID")
-
-        if _calc_missing:
-            st.error(f"Please enter a {' and '.join(_calc_missing)} before downloading.")
-        else:
             st.download_button(
-                label="Download CSV",
-                data=_calc_buf.getvalue(),
-                file_name=f"{st.session_state.mid} {st.session_state.cid} {st.session_state.ticket_type or 'Calc'}.csv",
+                label="Download Combined CSV",
+                data=_csv_buf.getvalue(),
+                file_name=f"batch_adjustment_{st.session_state.adj_date.strftime('%Y%m%d')}.csv",
                 mime="text/csv",
                 use_container_width=True,
-                key="calc_download_csv",
+                key="multi_csv_download",
             )
+            st.caption(f"{len(_bc)} rows ({len(_br)} employees, {len(_ct)} CID debit line(s))")
 
-        if st.session_state.get("ticket_type") == "MDV":
+            # CS Tools Summary — one per CID
             render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
+            _adj_date_display = st.session_state.adj_date.strftime("%m/%d/%Y")
 
-            st.caption("Paste the CS Tools link to make the header clickable")
-            st.text_input("CS Tools Link", placeholder="Paste link here...", key="calc_cs_link", label_visibility="visible")
-            _default_debit = st.session_state.adj_date.strftime("%m/%d/%Y") if "adj_date" in st.session_state and st.session_state.adj_date else ""
-            if "calc_debit_date" not in st.session_state or not st.session_state.calc_debit_date:
-                st.session_state.calc_debit_date = _default_debit
-            st.text_input("Debit Date", placeholder="e.g. 01/15/2025", key="calc_debit_date", label_visibility="visible")
+            for _cid_key, _cid_total in _ct.items():
+                _cid_emps = [r for r in _br if r["_cid_num"] == _cid_key]
+                _lines = []
+                for emp in _cid_emps:
+                    _lines.append(f"<b>{emp['MID']}</b>: Employee Credit ${emp['Net']:,.2f} on {_adj_date_display}")
+                _lines.append(f"<br>Employer Debit: <b>${_cid_total:,.2f}</b> on {_adj_date_display}")
 
-            st.divider()
-
-            _calc_debit_date = st.session_state.get("calc_debit_date", "").strip() or "XXXXX"
-            _calc_cs_url     = st.session_state.get("calc_cs_link", "").strip()
-            _calc_here_link  = (
-                f'<a href="{_calc_cs_url}" target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
-                if _calc_cs_url else 'here'
-            )
-            _bdown_rows = [
-                ("Gross Pay", fmt(_calc_gross), False),
-                ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
-                ("&minus; Medicare", fmt(-_calc_result.get("med_amount", 0)), False),
-            ]
-            if _calc_result.get("add_med_amount", 0) > 0:
-                _bdown_rows.append(("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]), False))
-            for _ci in _calc_result.get("custom_items", []):
-                _ci_name = _ci[0]
-                _ci_amt  = _ci[4] if len(_ci) >= 6 else (_ci[3] if len(_ci) >= 4 else _ci[2])
-                if _ci_amt == 0 or _ci_name == "Federal - Employee Withholding":
-                    continue
-                _bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
-            _bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
-
-            _bdown_table_html = (
-                '<table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:8px;">'
-                '<thead><tr style="border-bottom:2px solid #ccc;">'
-                '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
-                '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
-                '</tr></thead><tbody>'
-            )
-            for _lbl, _amt, _bold in _bdown_rows:
-                _a = f"<b>{_amt}</b>" if _bold else _amt
-                _l = f"<b>{_lbl}</b>" if _bold else _lbl
-                _bdown_table_html += f'<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:7px 4px;">{_l}</td><td style="text-align:right; padding:7px 8px;">{_a}</td></tr>'
-            _bdown_table_html += "</tbody></table>"
-
-            _full_copy_html = (
-                f'<p style="margin:0 0 8px 0; line-height:1.4;">'
-                f'The adjustment has been completed and can be viewed {_calc_here_link}. '
-                f'The employer will be debited ${_clearing_total:,.2f} on {_calc_debit_date} '
-                f'and the admin needs to pay the employee ${_calc_result.get("net", 0):,.2f} as a non taxable payment.'
-                f'</p>'
-                f'{_bdown_table_html}'
-                f'<p style="font-size:0.9rem; margin-top:12px;">'
-                f'The SOP for refunding benefit deductions can be found '
-                f'<a href="https://justworks.atlassian.net/wiki/spaces/CX/pages/474644752/Refunding+Benefits+Deductions" '
-                f'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
-                f' for your reference.</p>'
-                f'<p style="font-size:0.9rem; margin-top:4px;">'
-                f'Visit our team\'s page '
-                f'<a href="https://justworks.atlassian.net/wiki/spaces/PAY/pages/1951466586/Payroll+Operations+Team+-+PTU" '
-                f'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
-                f'.</p>'
-            )
-            render_copyable_html(_full_copy_html, "Copy Summary to Clipboard")
-
-        elif st.session_state.get("ticket_type") == "MISC Fully Taxable":
-            render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
-
-            st.caption("Paste the CS Tools link to make the header clickable")
-            st.text_input("CS Tools Link", placeholder="Paste link here...", key="calc_cs_link", label_visibility="visible")
-            st.text_input("Debit Date", placeholder="e.g. 01/15/2025", key="calc_debit_date", label_visibility="visible")
-
-            st.divider()
-
-            _misc_debit_date = st.session_state.get("calc_debit_date", "").strip() or "XXXXX"
-            _misc_cs_url     = st.session_state.get("calc_cs_link", "").strip()
-            _misc_adj_header = (
-                f'<a href="{_misc_cs_url}" target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">ADJ in CS Tools</a>'
-                if _misc_cs_url else '<strong>ADJ in CS Tools</strong>'
-            )
-            _misc_bdown_rows = [
-                ("Gross Pay", fmt(_calc_gross), False),
-                ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
-                ("&minus; Medicare", fmt(-_calc_result.get("med_amount", 0)), False),
-            ]
-            if _calc_result.get("add_med_amount", 0) > 0:
-                _misc_bdown_rows.append(("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]), False))
-            for _ci in _calc_result.get("custom_items", []):
-                _ci_name = _ci[0]
-                _ci_amt  = _ci[4] if len(_ci) >= 6 else (_ci[3] if len(_ci) >= 4 else _ci[2])
-                if _ci_amt == 0 or _ci_name == "Federal - Employee Withholding":
-                    continue
-                _misc_bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
-            _misc_bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
-
-            _misc_table_html = (
-                '<table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:8px;">'
-                '<thead><tr style="border-bottom:2px solid #ccc;">'
-                '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
-                '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
-                '</tr></thead><tbody>'
-            )
-            for _lbl, _amt, _bold in _misc_bdown_rows:
-                _a = f"<b>{_amt}</b>" if _bold else _amt
-                _l = f"<b>{_lbl}</b>" if _bold else _lbl
-                _misc_table_html += f'<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:7px 4px;">{_l}</td><td style="text-align:right; padding:7px 8px;">{_a}</td></tr>'
-            _misc_table_html += "</tbody></table>"
-
-            _misc_full_copy_html = (
-                f'<p style="margin:0 0 8px 0; line-height:1.4;">The adjustment has been completed and can be viewed below:</p>'
-                f'<p style="margin:0 0 8px 0; line-height:1.4;">'
-                f'{_misc_adj_header}<br>'
-                f'Employer Debit: ${_clearing_total:,.2f} on {_misc_debit_date}'
-                f'</p>'
-                f'{_misc_table_html}'
-            )
-            render_copyable_html(_misc_full_copy_html, "Copy Summary to Clipboard")
+                _summary_html = (
+                    f'<p style="margin:0 0 8px 0; line-height:1.6;">'
+                    f'The adjustment has been completed for CID <b>C{_cid_key}</b>:<br>'
+                    + "<br>".join(_lines)
+                    + f'</p>'
+                    f'<p style="font-size:0.9rem; margin-top:12px;">'
+                    f'The SOP for refunding benefit deductions can be found '
+                    f'<a href="https://justworks.atlassian.net/wiki/spaces/CX/pages/474644752/Refunding+Benefits+Deductions" '
+                    f'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
+                    f' for your reference.</p>'
+                    f'<p style="font-size:0.9rem; margin-top:4px;">'
+                    f'Visit our team\'s page '
+                    f'<a href="https://justworks.atlassian.net/wiki/spaces/PAY/pages/1951466586/Payroll+Operations+Team+-+PTU" '
+                    f'target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
+                    f'.</p>'
+                )
+                render_copyable_html(_summary_html, f"Copy CID C{_cid_key} Summary")
 
         else:
-            render_section_divider("poa", "CS TOOLS SUMMARY", "#ff006e")
-
-            st.caption("Paste the CS Tools link to make the header clickable")
-            st.text_input("CS Tools Link", placeholder="Paste link here...", key="calc_cs_link", label_visibility="visible")
-            _default_debit = st.session_state.adj_date.strftime("%m/%d/%Y") if "adj_date" in st.session_state and st.session_state.adj_date else ""
-            if "calc_debit_date" not in st.session_state or not st.session_state.calc_debit_date:
-                st.session_state.calc_debit_date = _default_debit
-            st.text_input("Debit Date", placeholder="e.g. 01/15/2025", key="calc_debit_date", label_visibility="visible")
-
-            st.divider()
-            _gen_debit_date = st.session_state.get("calc_debit_date", "").strip() or "XXXXX"
-            _gen_cs_url     = st.session_state.get("calc_cs_link", "").strip()
-            _gen_here_link  = (
-                f'<a href="{_gen_cs_url}" target="_blank" style="color:#2563eb; font-weight:600; text-decoration:none;">here</a>'
-                if _gen_cs_url else 'here'
-            )
-            _gen_bdown_rows = [
-                ("Gross Pay", fmt(_calc_gross), False),
-                ("&minus; Social Security", fmt(-_calc_result.get("ss_amount", 0)), False),
-                ("&minus; Medicare", fmt(-_calc_result.get("med_amount", 0)), False),
-            ]
-            if _calc_result.get("add_med_amount", 0) > 0:
-                _gen_bdown_rows.append(("&minus; Additional Medicare", fmt(-_calc_result["add_med_amount"]), False))
-            for _ci in _calc_result.get("custom_items", []):
-                _ci_name = _ci[0]
-                _ci_amt  = _ci[4] if len(_ci) >= 6 else (_ci[3] if len(_ci) >= 4 else _ci[2])
-                if _ci_amt == 0 or _ci_name == "Federal - Employee Withholding":
-                    continue
-                _gen_bdown_rows.append((f"&minus; {_ci_name}", fmt(-_ci_amt), False))
-            _gen_bdown_rows.append(("= Net Pay", fmt(_calc_result.get("net", 0)), True))
-
-            _gen_table_html = (
-                '<table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:8px;">'
-                '<thead><tr style="border-bottom:2px solid #ccc;">'
-                '<th style="text-align:left; padding:6px 4px; font-weight:600;">Item</th>'
-                '<th style="text-align:right; padding:6px 8px; font-weight:600;">Amount</th>'
-                '</tr></thead><tbody>'
-            )
-            for _lbl, _amt, _bold in _gen_bdown_rows:
-                _a = f"<b>{_amt}</b>" if _bold else _amt
-                _l = f"<b>{_lbl}</b>" if _bold else _lbl
-                _gen_table_html += f'<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:7px 4px;">{_l}</td><td style="text-align:right; padding:7px 8px;">{_a}</td></tr>'
-            _gen_table_html += "</tbody></table>"
-
-            _gen_full_copy_html = (
-                f'<p style="margin:0 0 8px 0; line-height:1.4;">'
-                f'The adjustment has been completed and can be viewed {_gen_here_link}. '
-                f'The employer will be debited ${_clearing_total:,.2f} on {_gen_debit_date}.'
-                f'</p>'
-                f'{_gen_table_html}'
-            )
-            render_copyable_html(_gen_full_copy_html, "Copy Summary to Clipboard")
+            st.caption("Paste employee data on the left and click **Calculate All** to see results.")
 
 # -----------------------------------------------------------------------
 # TAB 2 — FICA Refund
