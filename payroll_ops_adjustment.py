@@ -100,6 +100,10 @@ SUI_WAGE_BASES = {
 def get_sui_wage_base(state, year):
     return SUI_WAGE_BASES.get(state, {}).get(year)
 
+HARDCODED_RATES = {
+    "California - Employee Disability": {2024: 1.1, 2025: 1.2, 2026: 1.3},
+}
+
 STATE_ABBREV = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
     "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
@@ -971,7 +975,7 @@ with left:
                 _m_sig = f"{_m_state}_{_year_multi}"
                 if st.session_state.get(f"multi_pe_{_m_safe}_sig") != _m_sig:
                     _new_ee = [
-                        {"name": d, "rate": 0.0, "limit": "No"}
+                        {"name": d, "rate": HARDCODED_RATES.get(d, {}).get(_year_multi, 0.0), "limit": "No"}
                         for d in EMPLOYEE_DESCRIPTIONS if d.startswith(_m_state + " - ")
                     ]
                     _new_er = []
@@ -1116,9 +1120,9 @@ with right:
                 st.session_state._last_applied_state = new_state
                 _cb_ee = EMPLOYEE_DESCRIPTIONS + [d for d in st.session_state.get("extra_employee_descs", []) if d not in EMPLOYEE_DESCRIPTIONS]
                 _cb_er = EMPLOYER_DESCRIPTIONS + [d for d in st.session_state.get("extra_employer_descs", []) if d not in EMPLOYER_DESCRIPTIONS]
-                new_ee = [{"name": d, "rate": 0.0, "limit": "No"} for d in _cb_ee if d.startswith(new_state + " - ")]
-                # For employer unemployment taxes, apply saved SUI wage base as the limit
                 _sui_year = st.session_state.get("calc_year", 2026)
+                new_ee = [{"name": d, "rate": HARDCODED_RATES.get(d, {}).get(_sui_year, 0.0), "limit": "No"} for d in _cb_ee if d.startswith(new_state + " - ")]
+                # For employer unemployment taxes, apply saved SUI wage base as the limit
                 _sui_wb   = SUI_WAGE_BASES.get(new_state, {}).get(_sui_year)
                 new_er_raw = [{"name": d, "rate": 0.0, "limit": "No"} for d in _cb_er if d.startswith(new_state + " - ")]
                 new_er = []
