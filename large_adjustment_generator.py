@@ -756,6 +756,22 @@ STATE_CENTROIDS = {
 
 HARDCODED_RATES = {
     "California - Employee Disability": {2024: 1.1, 2025: 1.2, 2026: 1.3},
+    # Flat income tax states — Employee Withholding (-450)
+    "Arizona - Employee Withholding":       {2025: 2.5,    2026: 2.5},
+    "Colorado - Employee Withholding":      {2025: 4.4,    2026: 4.4},
+    "Georgia - Employee Withholding":       {2025: 5.39,   2026: 5.19},
+    "Idaho - Employee Withholding":         {2025: 5.695,  2026: 5.3},
+    "Illinois - Employee Withholding":      {2025: 4.95,   2026: 4.95},
+    "Indiana - Employee Withholding":       {2025: 3.0,    2026: 2.95},
+    "Iowa - Employee Withholding":          {2025: 3.8,    2026: 3.8},
+    "Kentucky - Employee Withholding":      {2025: 4.0,    2026: 3.5},
+    "Louisiana - Employee Withholding":     {2025: 3.09,   2026: 3.09},
+    "Massachusetts - Employee Withholding": {2025: 5.0,    2026: 5.0},
+    "Michigan - Employee Withholding":      {2025: 4.25,   2026: 4.25},
+    "Mississippi - Employee Withholding":   {2025: 4.4,    2026: 4.0},
+    "North Carolina - Employee Withholding":{2025: 4.35,   2026: 4.09},
+    "Pennsylvania - Employee Withholding":  {2025: 3.07,   2026: 3.07},
+    "Utah - Employee Withholding":          {2025: 4.55,   2026: 4.5},
 }
 
 # State supplemental withholding rates (%) — applied to -450 codes when "Supplemental Rates" enabled
