@@ -1014,10 +1014,27 @@ with left:
                     if not _new_er:
                         _new_er = [{"name": "", "rate": 0.0, "limit": "No"}]
                     # Clear stale widget keys
-                    for _j in range(max(20, len(_new_ee) + 5)):
+                    for _j in range(max(20, len(_new_ee) + 5, len(_new_er) + 5)):
                         for _sfx in ("tname", "trate", "tlimit", "tytd", "tlimit_amt", "custom_name", "custom_code"):
                             st.session_state.pop(f"multi_pe_{_m_safe}_ee_{_sfx}_{_j}", None)
                             st.session_state.pop(f"multi_pe_{_m_safe}_er_{_sfx}_{_j}", None)
+                    # Pre-seed widget keys so _tax_rows picks up correct defaults
+                    for _j, _t in enumerate(_new_ee):
+                        st.session_state[f"multi_pe_{_m_safe}_ee_tname_{_j}"] = _t["name"]
+                        st.session_state[f"multi_pe_{_m_safe}_ee_trate_{_j}"] = float(_t["rate"])
+                        st.session_state[f"multi_pe_{_m_safe}_ee_tlimit_{_j}"] = _t.get("limit", "No")
+                    for _j, _t in enumerate(_new_er):
+                        if _t.get("custom_entry"):
+                            st.session_state[f"multi_pe_{_m_safe}_er_tname_{_j}"] = "— Write in custom —"
+                            st.session_state[f"multi_pe_{_m_safe}_er_custom_name_{_j}"] = _t.get("custom_name", "")
+                            st.session_state[f"multi_pe_{_m_safe}_er_custom_code_{_j}"] = _t.get("custom_code", "")
+                        else:
+                            st.session_state[f"multi_pe_{_m_safe}_er_tname_{_j}"] = _t["name"]
+                        st.session_state[f"multi_pe_{_m_safe}_er_trate_{_j}"] = float(_t["rate"])
+                        st.session_state[f"multi_pe_{_m_safe}_er_tlimit_{_j}"] = _t.get("limit", "No")
+                        if _t.get("limit") == "Yes":
+                            st.session_state[f"multi_pe_{_m_safe}_er_tlimit_amt_{_j}"] = float(_t.get("limit_amount", 0.0))
+                            st.session_state[f"multi_pe_{_m_safe}_er_tytd_{_j}"] = float(_t.get("ytd_limit", 0.0))
                     st.session_state[_m_ee_key] = _new_ee
                     st.session_state[_m_er_key] = _new_er
                     st.session_state[f"multi_pe_{_m_safe}_sig"] = _m_sig
