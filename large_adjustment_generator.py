@@ -1,7 +1,11 @@
 import io
 import csv
 import base64
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import pandas as pd
 import streamlit as st
 from components import (
@@ -9,69 +13,19 @@ from components import (
     render_dashboard_header, render_auth_screen, render_app_sidebar,
     inject_global_css, page_config,
 )
+from sui_config import SUI_CONFIG, get_sui_wage_base as _sui_cfg_wage_base, get_sui_total_rate, get_sui_reporting
 
 page_config("Large Adjustment Generator", "")
 
 
 # ---------------------------------------------------------------------------
-# SUI wage bases
+# SUI wage bases (from sui_config)
 # ---------------------------------------------------------------------------
-SUI_WAGE_BASES = {
-    "Alabama":              {2025: 8000,   2026: 8000},
-    "Alaska":               {2025: 51700,  2026: 54200},
-    "Arizona":              {2025: 8000,   2026: 8000},
-    "Arkansas":             {2025: 7000,   2026: 7000},
-    "California":           {2025: 7000,   2026: 7000},
-    "Colorado":             {2025: 27200,  2026: 30600},
-    "Connecticut":          {2025: 26100,  2026: 27000},
-    "Delaware":             {2025: 12500,  2026: 14500},
-    "District of Columbia": {2025: 9000,   2026: 9000},
-    "Florida":              {2025: 7000,   2026: 7000},
-    "Georgia":              {2025: 9500,   2026: 9500},
-    "Hawaii":               {2025: 62000,  2026: 64500},
-    "Idaho":                {2025: 55300,  2026: 58300},
-    "Illinois":             {2025: 13916,  2026: 14250},
-    "Indiana":              {2025: 9500,   2026: 9500},
-    "Iowa":                 {2025: 39500,  2026: 20400},
-    "Kansas":               {2025: 14000,  2026: 15100},
-    "Kentucky":             {2025: 11700,  2026: 12000},
-    "Louisiana":            {2025: 7700,   2026: 7000},
-    "Maine":                {2025: 12000,  2026: 12000},
-    "Maryland":             {2025: 8500,   2026: 8500},
-    "Massachusetts":        {2025: 15000,  2026: 15000},
-    "Michigan":             {2025: 9000,   2026: 9000},
-    "Minnesota":            {2025: 43000,  2026: 44000},
-    "Mississippi":          {2025: 14000,  2026: 14000},
-    "Missouri":             {2025: 9500,   2026: 9000},
-    "Montana":              {2025: 45100,  2026: 47300},
-    "Nebraska":             {2025: 9000,   2026: 9000},
-    "Nevada":               {2025: 41800,  2026: 43700},
-    "New Hampshire":        {2025: 14000,  2026: 14000},
-    "New Jersey":           {2025: 43300,  2026: 44800},
-    "New Mexico":           {2025: 33200,  2026: 34800},
-    "New York":             {2025: 12800,  2026: 17600},
-    "North Carolina":       {2025: 32600,  2026: 34200},
-    "North Dakota":         {2025: 45100,  2026: 46600},
-    "Ohio":                 {2025: 9000,   2026: 9000},
-    "Oklahoma":             {2025: 28200,  2026: 25000},
-    "Oregon":               {2025: 54300,  2026: 56700},
-    "Pennsylvania":         {2025: 10000,  2026: 10000},
-    "Puerto Rico":          {2025: 7000,   2026: 7000},
-    "Rhode Island":         {2025: 29800,  2026: 30800},
-    "South Carolina":       {2025: 14000,  2026: 14000},
-    "South Dakota":         {2025: 15000,  2026: 15000},
-    "Tennessee":            {2025: 7000,   2026: 7000},
-    "Texas":                {2025: 9000,   2026: 9000},
-    "Utah":                 {2025: 48900,  2026: 50700},
-    "Vermont":              {2025: 14800,  2026: 15400},
-    "Virginia":             {2025: 8000,   2026: 8000},
-    "Virgin Islands":       {2025: 31100,  2026: 32100},
-    "Washington":           {2025: 72800,  2026: 78200},
-    "West Virginia":        {2025: 9500,   2026: 9500},
-    "Wisconsin":            {2025: 14000,  2026: 14000},
-    "Wyoming":              {2025: 32400,  2026: 33800},
-    "FUTA":                 {2025: 7000,   2026: 7000},
-}
+SUI_WAGE_BASES = {state: cfg["wage_base"] for state, cfg in SUI_CONFIG.items()}
+SUI_WAGE_BASES["FUTA"] = {2025: 7000, 2026: 7000}
+
+JWEG_OPTIONS = ["JWEG 1", "JWEG 2", "JWEG 3"]
+JWEG_KEYS = {"JWEG 1": "jweg1", "JWEG 2": "jweg2", "JWEG 3": "jweg3"}
 
 def get_sui_wage_base(state, year):
     return SUI_WAGE_BASES.get(state, {}).get(year)
@@ -1095,11 +1049,14 @@ tab_settings, tab_employees, tab_dump, tab_addl, tab_custom, tab_results, tab_vi
 with tab_settings:
     render_section_divider("lag", "SETTINGS", "#00e5ff")
 
-    year_col, mode_col, eetax_col, supfit_col, split_col, incomeonly_col, futa_col = st.columns(7)
+    year_col, mode_col, jweg_col, eetax_col, supfit_col, split_col, incomeonly_col, futa_col = st.columns(8)
     with year_col:
         year         = st.selectbox("Tax Year", [2026, 2025, 2024, 2023], key="lag_year")
         ss_wage_base = SS_WAGE_BASES[year]
         st.caption(f"SS wage base: **${ss_wage_base:,}**")
+
+    with jweg_col:
+        st.selectbox("JWEG", options=JWEG_OPTIONS, key="lag_jweg")
 
     with mode_col:
         mode = st.radio("Mode", ["Net Pay", "Gross Up"], key="lag_mode")
@@ -1207,7 +1164,7 @@ with tab_settings:
                     if _supl_rate is None and _emp_state == "Wisconsin":
                         # Wisconsin graduated brackets — resolve from employee gross
                         _emp_row_wi = _emp_preview[_emp_preview["mid"] == _mid]
-                        _emp_gross_wi = float(_emp_row_wi.iloc[0]["pay_amount"]) if not _emp_row_wi.empty else 0.0
+                        _emp_gross_wi = float(str(_emp_row_wi.iloc[0]["pay_amount"]).replace("$", "").replace(",", "")) if not _emp_row_wi.empty else 0.0
                         _supl_rate = 3.54
                         for _bracket_limit, _bracket_rate in WISCONSIN_SUPPLEMENTAL_BRACKETS:
                             if _emp_gross_wi <= _bracket_limit:
@@ -1346,20 +1303,28 @@ with tab_dump:
                 dump_df.columns = [c.strip() for c in dump_df.columns]
                 dump_df = dump_df.apply(lambda s: s.str.strip() if s.dtype == object else s)
 
-                missing = [c for c in ("MEMBER_ID", "TOTAL_GROSS_AMOUNT") if c not in dump_df.columns]
+                col_map = {c.upper().replace(" ", "_"): c for c in dump_df.columns}
+                mid_col = col_map.get("MEMBER_ID")
+                gross_col = col_map.get("TOTAL_GROSS_AMOUNT")
+
+                missing = []
+                if not mid_col:
+                    missing.append("MEMBER_ID")
+                if not gross_col:
+                    missing.append("TOTAL_GROSS_AMOUNT")
+
                 if missing:
                     st.error(f"Missing required column(s): {', '.join(missing)}")
                 else:
                     lookup = {}
                     for _, row in dump_df.iterrows():
-                        m = str(row["MEMBER_ID"]).strip()
+                        m = str(row[mid_col]).strip()
                         if not m:
                             continue
                         try:
-                            v = float(str(row["TOTAL_GROSS_AMOUNT"]).replace(",", "").replace("$", ""))
+                            v = float(str(row[gross_col]).replace(",", "").replace("$", ""))
                         except ValueError:
                             v = 0.0
-                        # Duplicate MEMBER_ID rows get their amounts summed
                         lookup[m] = lookup.get(m, 0.0) + v
                     st.session_state.lag_ytd_lookup   = lookup
                     st.session_state.lag_dump_file_id = _file_id
@@ -2384,7 +2349,13 @@ with tab_results:
             # Per-employee breakdown expanders
             with st.expander("Per-Employee Breakdown"):
                 for row in rows:
-                    st.markdown(f"**{row['MID']}** ({row['State']}) — Gross: {fmt(row['Gross Pay'])} | Net: {fmt(row['Net Pay'])} | YTD Med: {fmt(row['YTD Medicare Wages'])}")
+                    _gross = fmt(row['Gross Pay']).replace("$", "&#36;")
+                    _net = fmt(row['Net Pay']).replace("$", "&#36;")
+                    _ytd = fmt(row['YTD Medicare Wages']).replace("$", "&#36;")
+                    st.markdown(
+                        f'<span style="font-size:0.9rem;"><b>{row["MID"]}</b> ({row["State"]}) — '
+                        f'Gross: {_gross} | Net: {_net} | YTD Med: {_ytd}</span>',
+                        unsafe_allow_html=True)
                     cols = st.columns(4)
                     cols[0].metric("SS", fmt(row["SS Employee"]))
                     cols[1].metric("Medicare", fmt(row["Medicare Employee"]))

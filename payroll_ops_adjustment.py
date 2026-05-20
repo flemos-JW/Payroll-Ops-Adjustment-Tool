@@ -8,6 +8,10 @@ from components import (
     render_auth_screen, render_app_sidebar, render_header, render_section_divider,
     render_metric_row, inject_global_css, page_config, inject_tab_dots_css,
 )
+from sui_config import (
+    SUI_CONFIG, get_sui_wage_base as _sui_cfg_wage_base, get_sui_total_rate,
+    get_sui_reporting, get_sui_major_code, get_sui_minor_codes,
+)
 
 def _pdf_link(filename, color="#00e5ff"):
     import streamlit.components.v1 as _stc
@@ -38,64 +42,13 @@ def _pdf_link(filename, color="#00e5ff"):
 render_auth_screen("Payroll Ops Adjustment", "PayOps2026")
 
 # ---------------------------------------------------------------------------
-# SUI taxable wage bases  (hardcoded — sourced from uploaded table)
+# SUI taxable wage bases — sourced from sui_config.py (single source of truth)
 # ---------------------------------------------------------------------------
-SUI_WAGE_BASES = {
-    "Alabama":              {2025: 8000,   2026: 8000},
-    "Alaska":               {2025: 51700,  2026: 54200},
-    "Arizona":              {2025: 8000,   2026: 8000},
-    "Arkansas":             {2025: 7000,   2026: 7000},
-    "California":           {2025: 7000,   2026: 7000},
-    "Colorado":             {2025: 27200,  2026: 30600},
-    "Connecticut":          {2025: 26100,  2026: 27000},
-    "Delaware":             {2025: 12500,  2026: 14500},
-    "District of Columbia": {2025: 9000,   2026: 9000},
-    "Florida":              {2025: 7000,   2026: 7000},
-    "Georgia":              {2025: 9500,   2026: 9500},
-    "Hawaii":               {2025: 62000,  2026: 64500},
-    "Idaho":                {2025: 55300,  2026: 58300},
-    "Illinois":             {2025: 13916,  2026: 14250},
-    "Indiana":              {2025: 9500,   2026: 9500},
-    "Iowa":                 {2025: 39500,  2026: 20400},
-    "Kansas":               {2025: 14000,  2026: 15100},
-    "Kentucky":             {2025: 11700,  2026: 12000},
-    "Louisiana":            {2025: 7700,   2026: 7000},
-    "Maine":                {2025: 12000,  2026: 12000},
-    "Maryland":             {2025: 8500,   2026: 8500},
-    "Massachusetts":        {2025: 15000,  2026: 15000},
-    "Michigan":             {2025: 9000,   2026: 9000},
-    "Minnesota":            {2025: 43000,  2026: 44000},
-    "Mississippi":          {2025: 14000,  2026: 14000},
-    "Missouri":             {2025: 9500,   2026: 9000},
-    "Montana":              {2025: 45100,  2026: 47300},
-    "Nebraska":             {2025: 9000,   2026: 9000},
-    "Nevada":               {2025: 41800,  2026: 43700},
-    "New Hampshire":        {2025: 14000,  2026: 14000},
-    "New Jersey":           {2025: 43300,  2026: 44800},
-    "New Mexico":           {2025: 33200,  2026: 34800},
-    "New York":             {2025: 12800,  2026: 17600},
-    "North Carolina":       {2025: 32600,  2026: 34200},
-    "North Dakota":         {2025: 45100,  2026: 46600},
-    "Ohio":                 {2025: 9000,   2026: 9000},
-    "Oklahoma":             {2025: 28200,  2026: 25000},
-    "Oregon":               {2025: 54300,  2026: 56700},
-    "Pennsylvania":         {2025: 10000,  2026: 10000},
-    "Puerto Rico":          {2025: 7000,   2026: 7000},
-    "Rhode Island":         {2025: 29800,  2026: 30800},
-    "South Carolina":       {2025: 14000,  2026: 14000},
-    "South Dakota":         {2025: 15000,  2026: 15000},
-    "Tennessee":            {2025: 7000,   2026: 7000},
-    "Texas":                {2025: 9000,   2026: 9000},
-    "Utah":                 {2025: 48900,  2026: 50700},
-    "Vermont":              {2025: 14800,  2026: 15400},
-    "Virginia":             {2025: 8000,   2026: 8000},
-    "Virgin Islands":       {2025: 31100,  2026: 32100},
-    "Washington":           {2025: 72800,  2026: 78200},
-    "West Virginia":        {2025: 9500,   2026: 9500},
-    "Wisconsin":            {2025: 14000,  2026: 14000},
-    "Wyoming":              {2025: 32400,  2026: 33800},
-    "FUTA":                 {2025: 7000,   2026: 7000},
-}
+SUI_WAGE_BASES = {state: cfg["wage_base"] for state, cfg in SUI_CONFIG.items()}
+SUI_WAGE_BASES["FUTA"] = {2025: 7000, 2026: 7000}
+
+JWEG_OPTIONS = ["JWEG 1", "JWEG 2", "JWEG 3"]
+JWEG_KEYS = {"JWEG 1": "jweg1", "JWEG 2": "jweg2", "JWEG 3": "jweg3"}
 
 def get_sui_wage_base(state, year):
     return SUI_WAGE_BASES.get(state, {}).get(year)
@@ -607,12 +560,15 @@ page_config("Payroll Ops Adjustment", "")
 if "_clear_count" not in st.session_state:
     st.session_state._clear_count = 0
 
-def _clear_all():
+if st.session_state.get("_poa_clear_pending"):
     new_count = st.session_state._clear_count + 1
     st.session_state.clear()
     st.session_state.authenticated = True
     st.session_state._clear_count = new_count
     st.rerun()
+
+def _clear_all():
+    st.session_state._poa_clear_pending = True
 
 render_app_sidebar("Payroll Ops", "v2.0", "#00e5ff",
                    quick_actions=[{"label": "Clear Data", "callback": _clear_all,
@@ -1118,7 +1074,7 @@ with right:
             if preset:
                 st.session_state.notes = preset
 
-        tt_col, state_col = st.columns(2)
+        tt_col, state_col, jweg_col = st.columns(3)
         with tt_col:
             sel_tt = st.selectbox(
                 "Ticket Type",
@@ -1128,6 +1084,90 @@ with right:
                 on_change=_on_ticket_type_change,
             )
             st.session_state.ticket_type = sel_tt
+        with jweg_col:
+            if "poa_jweg" not in st.session_state:
+                st.session_state.poa_jweg = JWEG_OPTIONS[0]
+
+            def _build_sui_entries(state, jweg_key, sui_year):
+                """Build employer tax entries for SUI major + minor codes with rates from sui_config."""
+                sui_entries = []
+                if state not in SUI_CONFIG:
+                    return sui_entries
+                _sui_wb = SUI_WAGE_BASES.get(state, {}).get(sui_year)
+                _jweg_cfg = SUI_CONFIG[state].get(jweg_key, {})
+                _major_code = get_sui_major_code(state)
+                _major_rate = _jweg_cfg.get("major_rate", 0.0)
+                _minor_rates = _jweg_cfg.get("minor_rates", {})
+                if _major_code:
+                    entry = {
+                        "name": f"{state} - Employer Unemployment",
+                        "rate": round(_major_rate * 100, 4),
+                        "limit": "Yes" if _sui_wb else "No",
+                        "custom_entry": True,
+                        "custom_name": f"{state} - Employer Unemployment",
+                        "custom_code": _major_code,
+                    }
+                    if _sui_wb:
+                        entry["limit_amount"] = float(_sui_wb)
+                        entry["ytd_limit"] = 0.0
+                    sui_entries.append(entry)
+                for minor in get_sui_minor_codes(state):
+                    _m_code = minor["code"]
+                    _m_name = minor["name"]
+                    _m_rate = _minor_rates.get(_m_code, 0.0)
+                    entry = {
+                        "name": f"{state} - {_m_name}",
+                        "rate": round(_m_rate * 100, 4),
+                        "limit": "Yes" if _sui_wb else "No",
+                        "custom_entry": True,
+                        "custom_name": f"{state} - {_m_name}",
+                        "custom_code": _m_code,
+                    }
+                    if _sui_wb:
+                        entry["limit_amount"] = float(_sui_wb)
+                        entry["ytd_limit"] = 0.0
+                    sui_entries.append(entry)
+                return sui_entries
+
+            def _apply_sui_to_employer_taxes():
+                """Re-apply SUI rates from current JWEG to existing employer taxes."""
+                _state = st.session_state.get("state", "")
+                if not _state or _state not in SUI_CONFIG:
+                    return
+                _jweg_key = JWEG_KEYS.get(st.session_state.get("poa_jweg", "JWEG 1"), "jweg1")
+                _sui_year = st.session_state.get("calc_year", 2026)
+                _all_sui_codes = set()
+                _major = get_sui_major_code(_state)
+                if _major:
+                    _all_sui_codes.add(_major)
+                for m in get_sui_minor_codes(_state):
+                    _all_sui_codes.add(m["code"])
+                new_sui = _build_sui_entries(_state, _jweg_key, _sui_year)
+                # Replace SUI entries in employer_taxes, keep non-SUI entries
+                existing = st.session_state.get("employer_taxes", [])
+                non_sui = [t for t in existing if t.get("custom_code", "") not in _all_sui_codes
+                           and not ("unemployment" in t.get("name", "").lower() and t.get("custom_code", "") == "")]
+                updated = non_sui + new_sui
+                if not updated:
+                    updated = [{"name": "", "rate": 0.0, "limit": "No"}]
+                # Clear stale widget keys
+                for i in range(max(len(existing), len(updated)) + 5):
+                    for suffix in ("tname", "trate", "tlimit", "tytd", "tlimit_amt", "custom_name", "custom_code"):
+                        st.session_state.pop(f"er_{suffix}_{i}", None)
+                for i, tax in enumerate(updated):
+                    st.session_state[f"er_tname_{i}"] = tax["name"]
+                    st.session_state[f"er_trate_{i}"] = tax["rate"]
+                    st.session_state[f"er_tlimit_{i}"] = tax.get("limit", "No")
+                    if tax.get("limit") == "Yes":
+                        st.session_state[f"er_tlimit_amt_{i}"] = float(tax.get("limit_amount", 0.0))
+                        st.session_state[f"er_tytd_{i}"] = float(tax.get("ytd_limit", 0.0))
+                    if tax.get("custom_entry"):
+                        st.session_state[f"er_custom_name_{i}"] = tax.get("custom_name", "")
+                        st.session_state[f"er_custom_code_{i}"] = tax.get("custom_code", "")
+                st.session_state.employer_taxes = updated
+
+            st.selectbox("JWEG", options=JWEG_OPTIONS, key="poa_jweg", on_change=_apply_sui_to_employer_taxes)
+
         with state_col:
             def _on_state_change():
                 new_state = st.session_state.state
@@ -1137,27 +1177,37 @@ with right:
                 _cb_ee = EMPLOYEE_DESCRIPTIONS + [d for d in st.session_state.get("extra_employee_descs", []) if d not in EMPLOYEE_DESCRIPTIONS]
                 _cb_er = EMPLOYER_DESCRIPTIONS + [d for d in st.session_state.get("extra_employer_descs", []) if d not in EMPLOYER_DESCRIPTIONS]
                 _sui_year = st.session_state.get("calc_year", 2026)
+                _jweg_key = JWEG_KEYS.get(st.session_state.get("poa_jweg", "JWEG 1"), "jweg1")
                 new_ee = [{"name": d, "rate": HARDCODED_RATES.get(d, {}).get(_sui_year, 0.0), "limit": "No"} for d in _cb_ee if d.startswith(new_state + " - ")]
-                # For employer unemployment taxes, apply saved SUI wage base as the limit
-                _sui_wb   = SUI_WAGE_BASES.get(new_state, {}).get(_sui_year)
+                # Build non-SUI employer taxes from description list
+                _sui_wb = SUI_WAGE_BASES.get(new_state, {}).get(_sui_year)
+                _all_sui_codes = set()
+                _major = get_sui_major_code(new_state) if new_state in SUI_CONFIG else ""
+                if _major:
+                    _all_sui_codes.add(_major)
+                if new_state in SUI_CONFIG:
+                    for m in get_sui_minor_codes(new_state):
+                        _all_sui_codes.add(m["code"])
                 new_er_raw = [{"name": d, "rate": 0.0, "limit": "No"} for d in _cb_er if d.startswith(new_state + " - ")]
                 new_er = []
                 for t in new_er_raw:
-                    if "unemployment" in t["name"].lower() and _sui_wb:
-                        t["limit"]        = "Yes"
-                        t["limit_amount"] = float(_sui_wb)
-                        t["ytd_limit"]    = 0.0
+                    # Skip generic unemployment entries — we'll add SUI from config instead
+                    if "unemployment" in t["name"].lower():
+                        continue
                     new_er.append(t)
+                # Add SUI entries from sui_config with prefilled rates
+                sui_entries = _build_sui_entries(new_state, _jweg_key, _sui_year)
+                new_er = sui_entries + new_er
                 if not new_ee:
                     new_ee = [{"name": "", "rate": 0.0, "limit": "No"}]
                 if not new_er:
                     new_er = [{"name": "", "rate": 0.0, "limit": "No"}]
                 # Clear stale widget keys beyond new list lengths
                 for i in range(max(len(st.session_state.employee_taxes), len(new_ee)) + 5):
-                    for suffix in ("tname", "trate", "tlimit", "tytd", "tlimit_amt"):
+                    for suffix in ("tname", "trate", "tlimit", "tytd", "tlimit_amt", "custom_name", "custom_code"):
                         st.session_state.pop(f"ee_{suffix}_{i}", None)
                 for i in range(max(len(st.session_state.employer_taxes), len(new_er)) + 5):
-                    for suffix in ("tname", "trate", "tlimit", "tytd", "tlimit_amt"):
+                    for suffix in ("tname", "trate", "tlimit", "tytd", "tlimit_amt", "custom_name", "custom_code"):
                         st.session_state.pop(f"er_{suffix}_{i}", None)
                 for i, tax in enumerate(new_ee):
                     st.session_state[f"ee_tname_{i}"] = tax["name"]
@@ -1166,18 +1216,41 @@ with right:
                 for i, tax in enumerate(new_er):
                     st.session_state[f"er_tname_{i}"] = tax["name"]
                     st.session_state[f"er_trate_{i}"] = tax["rate"]
-                    st.session_state[f"er_tlimit_{i}"] = tax["limit"]
+                    st.session_state[f"er_tlimit_{i}"] = tax.get("limit", "No")
                     if tax.get("limit") == "Yes":
                         st.session_state[f"er_tlimit_amt_{i}"] = float(tax.get("limit_amount", 0.0))
-                        st.session_state[f"er_tytd_{i}"]       = float(tax.get("ytd_limit", 0.0))
+                        st.session_state[f"er_tytd_{i}"] = float(tax.get("ytd_limit", 0.0))
+                    if tax.get("custom_entry"):
+                        st.session_state[f"er_custom_name_{i}"] = tax.get("custom_name", "")
+                        st.session_state[f"er_custom_code_{i}"] = tax.get("custom_code", "")
                 st.session_state.employee_taxes = new_ee
                 st.session_state.employer_taxes = new_er
 
             st.selectbox("State", options=STATES, key="state", on_change=_on_state_change)
-            _sui_display_wb = get_sui_wage_base(st.session_state.state, year)
-            if _sui_display_wb:
+            _sui_display_state = st.session_state.state
+            _sui_display_wb = get_sui_wage_base(_sui_display_state, year)
+            if _sui_display_wb and _sui_display_state in SUI_CONFIG:
+                _jweg_disp_key = JWEG_KEYS.get(st.session_state.get("poa_jweg", "JWEG 1"), "jweg1")
+                _jweg_disp_cfg = SUI_CONFIG[_sui_display_state].get(_jweg_disp_key, {})
+                _disp_reporting = get_sui_reporting(_sui_display_state, _jweg_disp_key).upper()
+                _disp_total_rate = _jweg_disp_cfg.get("total_rate", 0.0)
+                _disp_major_rate = _jweg_disp_cfg.get("major_rate", 0.0)
+                _disp_minor_rates = _jweg_disp_cfg.get("minor_rates", {})
+                _rate_parts = [f"{_disp_major_rate*100:.3g}%"]
+                for _mc, _mr in _disp_minor_rates.items():
+                    _rate_parts.append(f"{_mr*100:.3g}%")
+                _rate_breakdown = " + ".join(_rate_parts)
                 st.markdown(
-                    f'<p style="font-size:0.85rem; color: gray; margin-top:-8px;">SUI wage base ({st.session_state.state}, {year}): '
+                    f'<p style="font-size:0.82rem; color:#8a9bb0; margin-top:-8px; line-height:1.5;">'
+                    f'SUI: <strong style="color:#06ffa5;">{_disp_total_rate*100:.3g}%</strong> '
+                    f'({_rate_breakdown}) '
+                    f'| Wage base: <strong>${_sui_display_wb:,}</strong> '
+                    f'| Reporting: <strong style="color:#ffbe0b;">{_disp_reporting}</strong></p>',
+                    unsafe_allow_html=True,
+                )
+            elif _sui_display_wb:
+                st.markdown(
+                    f'<p style="font-size:0.85rem; color: gray; margin-top:-8px;">SUI wage base ({_sui_display_state}, {year}): '
                     f'<strong>${_sui_display_wb:,}</strong></p>',
                     unsafe_allow_html=True,
                 )
