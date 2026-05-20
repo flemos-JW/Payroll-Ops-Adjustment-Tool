@@ -912,7 +912,7 @@ with left:
         # ---- Multi-Employee Mode (MDV Batch) ----
         render_section_divider("poa", "BATCH INPUT", "#ffbe0b")
 
-        _MULTI_TEMPLATE = "MID\tCID\tGrossPay\tYTD_Medicare\tState\nM123456\tC789\t5000.00\t150000\tCalifornia\nM234567\tC789\t3200.00\t80000\tNew York\nM345678\tC900\t4500.00\t200000\tTexas\n"
+        _MULTI_TEMPLATE = "MID\tCID\tGrossPay\tYTD_Medicare\tState\tJWEG\nM123456\tC789\t5000.00\t150000\tCalifornia\tJWEG 1\nM234567\tC789\t3200.00\t80000\tNew York\tJWEG 2\nM345678\tC900\t4500.00\t200000\tTexas\tJWEG 1\n"
 
         st.download_button(
             "Download CSV Template",
@@ -924,14 +924,14 @@ with left:
 
         st.caption(
             "Paste a tab or comma-separated table with columns: "
-            "**MID**, **CID**, **GrossPay**, **YTD_Medicare**, **State**. "
-            "Taxes auto-populate from state. Duplicates removed."
+            "**MID**, **CID**, **GrossPay**, **YTD_Medicare**, **State**, **JWEG**. "
+            "JWEG defaults to JWEG 1 if left blank. Taxes auto-populate from state + JWEG. Duplicates removed."
         )
 
         _multi_raw = st.text_area(
             "Employee Table",
             height=280,
-            placeholder="MID\tCID\tGrossPay\tYTD_Medicare\tState\nM123456\tC789\t5000.00\t150000\tCalifornia",
+            placeholder="MID\tCID\tGrossPay\tYTD_Medicare\tState\tJWEG\nM123456\tC789\t5000.00\t150000\tCalifornia\tJWEG 1",
             key="multi_emp_raw",
             label_visibility="collapsed",
         )
@@ -945,9 +945,17 @@ with left:
             try:
                 _multi_df = pd.read_csv(io.StringIO(_multi_raw), sep=_sep, dtype=str).fillna("")
                 _multi_df = _multi_df.dropna(how="all")
-                if _multi_df.shape[1] >= 5:
+                if _multi_df.shape[1] >= 6:
+                    _multi_df = _multi_df.iloc[:, :6]
+                    _multi_df.columns = ["MID", "CID", "GrossPay", "YTD_Medicare", "State", "JWEG"]
+                elif _multi_df.shape[1] >= 5:
                     _multi_df = _multi_df.iloc[:, :5]
                     _multi_df.columns = ["MID", "CID", "GrossPay", "YTD_Medicare", "State"]
+                    _multi_df["JWEG"] = ""
+                else:
+                    _multi_err = f"Expected 5-6 columns, got {_multi_df.shape[1]}. Need: MID, CID, GrossPay, YTD_Medicare, State, JWEG"
+                    _multi_df = None
+                if _multi_df is not None:
                     _multi_df = _multi_df.apply(lambda s: s.str.strip() if s.dtype == object else s)
                     _multi_df = _multi_df[_multi_df["MID"].str.len() > 0]
                     _multi_df = _multi_df.drop_duplicates(subset=["MID"]).reset_index(drop=True)
@@ -955,12 +963,13 @@ with left:
                     _multi_df["State"] = _multi_df["State"].apply(
                         lambda s: STATE_ABBREV.get(s.upper(), s) if len(s) <= 3 else s
                     )
+                    # Normalize JWEG — default to JWEG 1 if blank
+                    _multi_df["JWEG"] = _multi_df["JWEG"].apply(
+                        lambda j: j if j in JWEG_OPTIONS else "JWEG 1"
+                    )
                     # Validate numeric columns
                     _multi_df["GrossPay"] = pd.to_numeric(_multi_df["GrossPay"].str.replace(",", "").str.replace("$", ""), errors="coerce").fillna(0)
                     _multi_df["YTD_Medicare"] = pd.to_numeric(_multi_df["YTD_Medicare"].str.replace(",", "").str.replace("$", ""), errors="coerce").fillna(0)
-                else:
-                    _multi_err = f"Expected 5 columns, got {_multi_df.shape[1]}. Need: MID, CID, GrossPay, YTD_Medicare, State"
-                    _multi_df = None
             except Exception as e:
                 _multi_err = f"Could not parse table: {e}"
                 _multi_df = None
@@ -985,7 +994,8 @@ with left:
                 _m_ee_key = f"multi_pe_{_m_safe}_ee_taxes"
                 _m_er_key = f"multi_pe_{_m_safe}_er_taxes"
 
-                _m_jweg_key = JWEG_KEYS.get(st.session_state.get("poa_jweg", "JWEG 1"), "jweg1")
+                _m_jweg = str(_row.get("JWEG", "JWEG 1")).strip() or "JWEG 1"
+                _m_jweg_key = JWEG_KEYS.get(_m_jweg, "jweg1")
                 _m_sig = f"{_m_state}_{_year_multi}_{_m_jweg_key}"
                 if st.session_state.get(f"multi_pe_{_m_safe}_sig") != _m_sig:
                     _new_ee = [
@@ -1020,7 +1030,7 @@ with left:
                 _m_ee_prefix = f"multi_pe_{_m_safe}_ee"
                 _m_er_prefix = f"multi_pe_{_m_safe}_er"
 
-                with st.expander(f"{_m_mid} — {_m_state} (Gross: ${_m_gross:,.2f})"):
+                with st.expander(f"{_m_mid} — {_m_state} | {_m_jweg} (Gross: ${_m_gross:,.2f})"):
                     st.caption("Employee withholdings")
                     _h1, _h2, _h3, _h4, _ = st.columns([3, 1.2, 1.2, 0.9, 0.4])
                     _h1.markdown("**Tax Name**")
