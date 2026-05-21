@@ -64,13 +64,11 @@ def _build_sui_entries(state, jweg_key, sui_year):
     _major_rate = _jweg_cfg.get("major_rate", 0.0)
     _minor_rates = _jweg_cfg.get("minor_rates", {})
     if _major_code:
+        _major_name = f"{state} - Employer Unemployment"
         entry = {
-            "name": f"{state} - Employer Unemployment",
+            "name": _major_name,
             "rate": round(_major_rate * 100, 4),
             "limit": "Yes" if _sui_wb else "No",
-            "custom_entry": True,
-            "custom_name": f"{state} - Employer Unemployment",
-            "custom_code": _major_code,
         }
         if _sui_wb:
             entry["limit_amount"] = float(_sui_wb)
@@ -1179,15 +1177,17 @@ with right:
                     for suffix in ("tname", "trate", "tlimit", "tytd", "tlimit_amt", "custom_name", "custom_code"):
                         st.session_state.pop(f"er_{suffix}_{i}", None)
                 for i, tax in enumerate(updated):
-                    st.session_state[f"er_tname_{i}"] = tax["name"]
+                    if tax.get("custom_entry"):
+                        st.session_state[f"er_tname_{i}"] = "— Write in custom —"
+                        st.session_state[f"er_custom_name_{i}"] = tax.get("custom_name", "")
+                        st.session_state[f"er_custom_code_{i}"] = tax.get("custom_code", "")
+                    else:
+                        st.session_state[f"er_tname_{i}"] = tax["name"]
                     st.session_state[f"er_trate_{i}"] = tax["rate"]
                     st.session_state[f"er_tlimit_{i}"] = tax.get("limit", "No")
                     if tax.get("limit") == "Yes":
                         st.session_state[f"er_tlimit_amt_{i}"] = float(tax.get("limit_amount", 0.0))
                         st.session_state[f"er_tytd_{i}"] = float(tax.get("ytd_limit", 0.0))
-                    if tax.get("custom_entry"):
-                        st.session_state[f"er_custom_name_{i}"] = tax.get("custom_name", "")
-                        st.session_state[f"er_custom_code_{i}"] = tax.get("custom_code", "")
                 st.session_state.employer_taxes = updated
 
             st.selectbox("JWEG", options=JWEG_OPTIONS, key="poa_jweg", on_change=_apply_sui_to_employer_taxes)
@@ -1238,15 +1238,17 @@ with right:
                     st.session_state[f"ee_trate_{i}"] = tax["rate"]
                     st.session_state[f"ee_tlimit_{i}"] = tax["limit"]
                 for i, tax in enumerate(new_er):
-                    st.session_state[f"er_tname_{i}"] = tax["name"]
+                    if tax.get("custom_entry"):
+                        st.session_state[f"er_tname_{i}"] = "— Write in custom —"
+                        st.session_state[f"er_custom_name_{i}"] = tax.get("custom_name", "")
+                        st.session_state[f"er_custom_code_{i}"] = tax.get("custom_code", "")
+                    else:
+                        st.session_state[f"er_tname_{i}"] = tax["name"]
                     st.session_state[f"er_trate_{i}"] = tax["rate"]
                     st.session_state[f"er_tlimit_{i}"] = tax.get("limit", "No")
                     if tax.get("limit") == "Yes":
                         st.session_state[f"er_tlimit_amt_{i}"] = float(tax.get("limit_amount", 0.0))
                         st.session_state[f"er_tytd_{i}"] = float(tax.get("ytd_limit", 0.0))
-                    if tax.get("custom_entry"):
-                        st.session_state[f"er_custom_name_{i}"] = tax.get("custom_name", "")
-                        st.session_state[f"er_custom_code_{i}"] = tax.get("custom_code", "")
                 st.session_state.employee_taxes = new_ee
                 st.session_state.employer_taxes = new_er
 
