@@ -53,63 +53,6 @@ JWEG_KEYS = {"JWEG 1": "jweg1", "JWEG 2": "jweg2", "JWEG 3": "jweg3"}
 def get_sui_wage_base(state, year):
     return SUI_WAGE_BASES.get(state, {}).get(year)
 
-_CODE_TO_DESC = {v: k for k, v in DESC_TO_CODE.items()}
-
-def _build_sui_entries(state, jweg_key, sui_year):
-    """Build employer tax entries for SUI major + minor codes with rates from sui_config."""
-    sui_entries = []
-    if state not in SUI_CONFIG:
-        return sui_entries
-    _sui_wb = SUI_WAGE_BASES.get(state, {}).get(sui_year)
-    _jweg_cfg = SUI_CONFIG[state].get(jweg_key, {})
-    _major_code = get_sui_major_code(state)
-    _major_rate = _jweg_cfg.get("major_rate", 0.0)
-    _minor_rates = _jweg_cfg.get("minor_rates", {})
-    if _major_code:
-        entry = {
-            "name": f"{state} - Employer Unemployment",
-            "rate": round(_major_rate * 100, 4),
-            "limit": "Yes" if _sui_wb else "No",
-        }
-        if _sui_wb:
-            entry["limit_amount"] = float(_sui_wb)
-            entry["ytd_limit"] = 0.0
-        sui_entries.append(entry)
-    for minor in get_sui_minor_codes(state):
-        _m_code = minor["code"]
-        _m_rate = _minor_rates.get(_m_code, 0.0)
-        _desc_name = _CODE_TO_DESC.get(_m_code)
-        if _desc_name:
-            entry = {
-                "name": _desc_name,
-                "rate": round(_m_rate * 100, 4),
-                "limit": "Yes" if _sui_wb else "No",
-            }
-        else:
-            entry = {
-                "name": f"{state} - {minor['name']}",
-                "rate": round(_m_rate * 100, 4),
-                "limit": "Yes" if _sui_wb else "No",
-                "custom_entry": True,
-                "custom_name": f"{state} - {minor['name']}",
-                "custom_code": _m_code,
-            }
-        if _sui_wb:
-            entry["limit_amount"] = float(_sui_wb)
-            entry["ytd_limit"] = 0.0
-        sui_entries.append(entry)
-    return sui_entries
-
-def _get_sui_covered_codes(state):
-    """Return set of tax codes handled by _build_sui_entries for a state."""
-    codes = set()
-    major = get_sui_major_code(state)
-    if major:
-        codes.add(major)
-    for m in get_sui_minor_codes(state):
-        codes.add(m["code"])
-    return codes
-
 HARDCODED_RATES = {
     "California - Employee Disability": {2024: 1.1, 2025: 1.2, 2026: 1.3},
     # Flat income tax states — Employee Withholding (-450)
@@ -597,6 +540,65 @@ DESC_TO_CODE = {
 }
 
 TAX_DESCRIPTIONS      = sorted(DESC_TO_CODE.keys())
+_CODE_TO_DESC = {v: k for k, v in DESC_TO_CODE.items()}
+
+
+def _build_sui_entries(state, jweg_key, sui_year):
+    """Build employer tax entries for SUI major + minor codes with rates from sui_config."""
+    sui_entries = []
+    if state not in SUI_CONFIG:
+        return sui_entries
+    _sui_wb = SUI_WAGE_BASES.get(state, {}).get(sui_year)
+    _jweg_cfg = SUI_CONFIG[state].get(jweg_key, {})
+    _major_code = get_sui_major_code(state)
+    _major_rate = _jweg_cfg.get("major_rate", 0.0)
+    _minor_rates = _jweg_cfg.get("minor_rates", {})
+    if _major_code:
+        entry = {
+            "name": f"{state} - Employer Unemployment",
+            "rate": round(_major_rate * 100, 4),
+            "limit": "Yes" if _sui_wb else "No",
+        }
+        if _sui_wb:
+            entry["limit_amount"] = float(_sui_wb)
+            entry["ytd_limit"] = 0.0
+        sui_entries.append(entry)
+    for minor in get_sui_minor_codes(state):
+        _m_code = minor["code"]
+        _m_rate = _minor_rates.get(_m_code, 0.0)
+        _desc_name = _CODE_TO_DESC.get(_m_code)
+        if _desc_name:
+            entry = {
+                "name": _desc_name,
+                "rate": round(_m_rate * 100, 4),
+                "limit": "Yes" if _sui_wb else "No",
+            }
+        else:
+            entry = {
+                "name": f"{state} - {minor['name']}",
+                "rate": round(_m_rate * 100, 4),
+                "limit": "Yes" if _sui_wb else "No",
+                "custom_entry": True,
+                "custom_name": f"{state} - {minor['name']}",
+                "custom_code": _m_code,
+            }
+        if _sui_wb:
+            entry["limit_amount"] = float(_sui_wb)
+            entry["ytd_limit"] = 0.0
+        sui_entries.append(entry)
+    return sui_entries
+
+
+def _get_sui_covered_codes(state):
+    """Return set of tax codes handled by _build_sui_entries for a state."""
+    codes = set()
+    major = get_sui_major_code(state)
+    if major:
+        codes.add(major)
+    for m in get_sui_minor_codes(state):
+        codes.add(m["code"])
+    return codes
+
 
 _EXCLUDED_DESCRIPTIONS = {
     "Federal - Employee Medicare",
