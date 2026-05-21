@@ -53,6 +53,8 @@ JWEG_KEYS = {"JWEG 1": "jweg1", "JWEG 2": "jweg2", "JWEG 3": "jweg3"}
 def get_sui_wage_base(state, year):
     return SUI_WAGE_BASES.get(state, {}).get(year)
 
+_CODE_TO_DESC = {v: k for k, v in DESC_TO_CODE.items()}
+
 def _build_sui_entries(state, jweg_key, sui_year):
     """Build employer tax entries for SUI major + minor codes with rates from sui_config."""
     sui_entries = []
@@ -64,9 +66,8 @@ def _build_sui_entries(state, jweg_key, sui_year):
     _major_rate = _jweg_cfg.get("major_rate", 0.0)
     _minor_rates = _jweg_cfg.get("minor_rates", {})
     if _major_code:
-        _major_name = f"{state} - Employer Unemployment"
         entry = {
-            "name": _major_name,
+            "name": f"{state} - Employer Unemployment",
             "rate": round(_major_rate * 100, 4),
             "limit": "Yes" if _sui_wb else "No",
         }
@@ -76,21 +77,38 @@ def _build_sui_entries(state, jweg_key, sui_year):
         sui_entries.append(entry)
     for minor in get_sui_minor_codes(state):
         _m_code = minor["code"]
-        _m_name = minor["name"]
         _m_rate = _minor_rates.get(_m_code, 0.0)
-        entry = {
-            "name": f"{state} - {_m_name}",
-            "rate": round(_m_rate * 100, 4),
-            "limit": "Yes" if _sui_wb else "No",
-            "custom_entry": True,
-            "custom_name": f"{state} - {_m_name}",
-            "custom_code": _m_code,
-        }
+        _desc_name = _CODE_TO_DESC.get(_m_code)
+        if _desc_name:
+            entry = {
+                "name": _desc_name,
+                "rate": round(_m_rate * 100, 4),
+                "limit": "Yes" if _sui_wb else "No",
+            }
+        else:
+            entry = {
+                "name": f"{state} - {minor['name']}",
+                "rate": round(_m_rate * 100, 4),
+                "limit": "Yes" if _sui_wb else "No",
+                "custom_entry": True,
+                "custom_name": f"{state} - {minor['name']}",
+                "custom_code": _m_code,
+            }
         if _sui_wb:
             entry["limit_amount"] = float(_sui_wb)
             entry["ytd_limit"] = 0.0
         sui_entries.append(entry)
     return sui_entries
+
+def _get_sui_covered_codes(state):
+    """Return set of tax codes handled by _build_sui_entries for a state."""
+    codes = set()
+    major = get_sui_major_code(state)
+    if major:
+        codes.add(major)
+    for m in get_sui_minor_codes(state):
+        codes.add(m["code"])
+    return codes
 
 HARDCODED_RATES = {
     "California - Employee Disability": {2024: 1.1, 2025: 1.2, 2026: 1.3},
@@ -1001,9 +1019,12 @@ with left:
                         for d in EMPLOYEE_DESCRIPTIONS if d.startswith(_m_state + " - ")
                     ]
                     # Build employer taxes: non-SUI from descriptions + SUI from sui_config
+                    _m_sui_covered = _get_sui_covered_codes(_m_state) if _m_state in SUI_CONFIG else set()
                     _new_er = []
                     for _d in EMPLOYER_DESCRIPTIONS:
-                        if _d.startswith(_m_state + " - ") and "unemployment" not in _d.lower():
+                        if _d.startswith(_m_state + " - "):
+                            if DESC_TO_CODE.get(_d, "") in _m_sui_covered:
+                                continue
                             _new_er.append({"name": _d, "rate": 0.0, "limit": "No"})
                     _sui_entries = _build_sui_entries(_m_state, _m_jweg_key, _year_multi)
                     _new_er = _sui_entries + _new_er
@@ -1158,17 +1179,16 @@ with right:
                     return
                 _jweg_key = JWEG_KEYS.get(st.session_state.get("poa_jweg", "JWEG 1"), "jweg1")
                 _sui_year = st.session_state.get("calc_year", 2026)
-                _all_sui_codes = set()
-                _major = get_sui_major_code(_state)
-                if _major:
-                    _all_sui_codes.add(_major)
-                for m in get_sui_minor_codes(_state):
-                    _all_sui_codes.add(m["code"])
+                _sui_covered = _get_sui_covered_codes(_state)
                 new_sui = _build_sui_entries(_state, _jweg_key, _sui_year)
                 # Replace SUI entries in employer_taxes, keep non-SUI entries
                 existing = st.session_state.get("employer_taxes", [])
-                non_sui = [t for t in existing if t.get("custom_code", "") not in _all_sui_codes
-                           and not ("unemployment" in t.get("name", "").lower() and t.get("custom_code", "") == "")]
+                non_sui = []
+                for t in existing:
+                    _t_code = t.get("custom_code", "") or DESC_TO_CODE.get(t.get("name", ""), "")
+                    if _t_code in _sui_covered:
+                        continue
+                    non_sui.append(t)
                 updated = non_sui + new_sui
                 if not updated:
                     updated = [{"name": "", "rate": 0.0, "limit": "No"}]
@@ -1204,19 +1224,12 @@ with right:
                 _jweg_key = JWEG_KEYS.get(st.session_state.get("poa_jweg", "JWEG 1"), "jweg1")
                 new_ee = [{"name": d, "rate": HARDCODED_RATES.get(d, {}).get(_sui_year, 0.0), "limit": "No"} for d in _cb_ee if d.startswith(new_state + " - ")]
                 # Build non-SUI employer taxes from description list
-                _sui_wb = SUI_WAGE_BASES.get(new_state, {}).get(_sui_year)
-                _all_sui_codes = set()
-                _major = get_sui_major_code(new_state) if new_state in SUI_CONFIG else ""
-                if _major:
-                    _all_sui_codes.add(_major)
-                if new_state in SUI_CONFIG:
-                    for m in get_sui_minor_codes(new_state):
-                        _all_sui_codes.add(m["code"])
+                _sui_covered = _get_sui_covered_codes(new_state) if new_state in SUI_CONFIG else set()
                 new_er_raw = [{"name": d, "rate": 0.0, "limit": "No"} for d in _cb_er if d.startswith(new_state + " - ")]
                 new_er = []
                 for t in new_er_raw:
-                    # Skip generic unemployment entries — we'll add SUI from config instead
-                    if "unemployment" in t["name"].lower():
+                    _t_code = DESC_TO_CODE.get(t["name"], "")
+                    if _t_code in _sui_covered:
                         continue
                     new_er.append(t)
                 # Add SUI entries from sui_config with prefilled rates
