@@ -1975,6 +1975,7 @@ with tab_fica:
                 _ss_auto = round(q["ss_wages"] * 0.062, 2)
                 if q["ss_tax"] == 0.0 and q["ss_wages"] > 0:
                     q["ss_tax"] = _ss_auto
+                    st.session_state[f"fica_ss_tax_{qn}"] = _ss_auto
                 q["ss_tax"]   = st.number_input("SS Tax ($)",   min_value=0.0, value=q["ss_tax"],   step=0.01, format="%.2f", key=f"fica_ss_tax_{qn}")
             with med_col:
                 st.caption("**Medicare**")
@@ -1982,6 +1983,7 @@ with tab_fica:
                 _med_auto = round(q["med_wages"] * 0.0145, 2)
                 if q["med_tax"] == 0.0 and q["med_wages"] > 0:
                     q["med_tax"] = _med_auto
+                    st.session_state[f"fica_med_tax_{qn}"] = _med_auto
                 q["med_tax"]   = st.number_input("Medicare Tax ($)",   min_value=0.0, value=q["med_tax"],   step=0.01, format="%.2f", key=f"fica_med_tax_{qn}")
             with futa_col:
                 st.caption("**FUTA**")
@@ -1989,6 +1991,7 @@ with tab_fica:
                 _futa_auto = round(q["futa_wages"] * 0.006, 2)
                 if q["futa_tax"] == 0.0 and q["futa_wages"] > 0:
                     q["futa_tax"] = _futa_auto
+                    st.session_state[f"fica_futa_tax_{qn}"] = _futa_auto
                 q["futa_tax"]   = st.number_input("FUTA Tax ($)",   min_value=0.0, value=q["futa_tax"],   step=0.01, format="%.2f", key=f"fica_futa_tax_{qn}")
 
             _dk = f"fica_adj_date_{qn}_v{st.session_state.fica_year_version}"
